@@ -10,3 +10,5 @@ repository.workspace = true
 [dependencies]
 russh = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

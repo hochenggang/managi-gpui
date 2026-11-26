@@ -23,6 +23,9 @@ pub struct Node {
     pub username: String,
     #[serde(default)]
     pub auth: AuthKind,
+    /// 私钥文件路径；仅存路径，不复制内容。
+    #[serde(default)]
+    pub key_path: String,
     /// 分组名；空串表示未分组。
     #[serde(default)]
     pub group: String,
@@ -47,6 +50,7 @@ impl Node {
             port,
             username: username.into(),
             auth: AuthKind::Password,
+            key_path: String::new(),
             group: String::new(),
         }
     }
