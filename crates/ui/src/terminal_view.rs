@@ -188,6 +188,16 @@ pub(crate) fn render(
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                 this.term_focus.focus(window, cx);
             }))
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
+                let lines = match event.delta {
+                    ScrollDelta::Lines(delta) => delta.y.round() as i32,
+                    ScrollDelta::Pixels(delta) => (delta.y.as_f32() / line_height).round() as i32,
+                };
+                if lines != 0 {
+                    this.scroll_active(lines, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 this.handle_terminal_key(event, cx);
             }))
@@ -226,7 +236,8 @@ fn row_element(row: &SnapshotRow, palette: Palette, font_size: f32, line_height:
         .w_full()
         .flex_shrink_0()
         .overflow_hidden()
-        .child(StyledText::new(text).with_runs(runs).text_size(px(font_size)))
+        .text_size(px(font_size))
+        .child(StyledText::new(text).with_runs(runs))
 }
 
 fn text_run(run: &SnapshotRun, end: usize, palette: Palette) -> TextRun {

@@ -84,9 +84,9 @@ impl AppView {
         }
 
         if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
-            self.start_session(&tab_id, node, None, cx);
+            self.start_session(&tab_id, node, None, window, cx);
         } else if let Some(password) = self.passwords.get(&node.id).cloned() {
-            self.start_session(&tab_id, node, Some(password), cx);
+            self.start_session(&tab_id, node, Some(password), window, cx);
         } else {
             let strings = self.state.strings();
             self.open_prompt(
@@ -104,6 +104,7 @@ impl AppView {
         tab_id: &str,
         node: &Node,
         password: Option<String>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let auth = match node.auth {
@@ -147,6 +148,7 @@ impl AppView {
                 self.state.notice = Some(error.to_string());
             }
         }
+        self.term_focus.focus(window, cx);
         cx.notify();
     }
 
@@ -164,9 +166,9 @@ impl AppView {
         self.terminals.remove(&tab_id);
 
         if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
-            self.start_session(&tab_id, &node, None, cx);
+            self.start_session(&tab_id, &node, None, window, cx);
         } else if let Some(password) = self.passwords.get(&node.id).cloned() {
-            self.start_session(&tab_id, &node, Some(password), cx);
+            self.start_session(&tab_id, &node, Some(password), window, cx);
         } else {
             let strings = self.state.strings();
             self.open_prompt(
@@ -187,6 +189,50 @@ impl AppView {
         let Some(tab_id) = self.state.active_tab.clone() else {
             return;
         };
+        let keystroke = &event.keystroke;
+        let key = keystroke.key.as_str();
+        let control = keystroke.modifiers.control;
+        let shift = keystroke.modifiers.shift;
+
+        if control && shift && key.eq_ignore_ascii_case("c") {
+            if let Some(runtime) = self.terminals.get(&tab_id) {
+                let text = runtime.model.screen_text();
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+            return;
+        }
+        if control && shift && key.eq_ignore_ascii_case("v") {
+            let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+                return;
+            };
+            let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+                return;
+            };
+            if !runtime.is_live() {
+                return;
+            }
+            let mut payload = text.replace("\r\n", "\n").replace('\n', "\r").into_bytes();
+            if runtime.bracketed_paste() {
+                let mut wrapped = Vec::with_capacity(payload.len() + 12);
+                wrapped.extend_from_slice(b"\x1b[200~");
+                wrapped.append(&mut payload);
+                wrapped.extend_from_slice(b"\x1b[201~");
+                runtime.handle.write(wrapped);
+            } else {
+                runtime.handle.write(payload);
+            }
+            cx.notify();
+            return;
+        }
+        if shift && key.eq_ignore_ascii_case("pageup") {
+            self.scroll_active(8, cx);
+            return;
+        }
+        if shift && key.eq_ignore_ascii_case("pagedown") {
+            self.scroll_active(-8, cx);
+            return;
+        }
+
         let Some(runtime) = self.terminals.get_mut(&tab_id) else {
             return;
         };
@@ -208,17 +254,22 @@ impl AppView {
         cx.notify();
     }
 
-    fn poll_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(active_tab) = self.state.active_tab.clone() else {
+    pub(crate) fn scroll_active(&mut self, lines: i32, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
             return;
         };
-        let terminal_tab = self
+        if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+            runtime.scroll(lines);
+            cx.notify();
+        }
+    }
+
+    fn poll_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active_tab = self.state.active_tab.clone();
+        let active_is_terminal = self
             .state
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::Terminal);
-        if !terminal_tab || !self.terminals.contains_key(&active_tab) {
-            return;
-        }
 
         let valid_tabs: Vec<String> = self
             .state
@@ -229,6 +280,10 @@ impl AppView {
         self.terminals
             .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
 
+        if self.terminals.is_empty() {
+            return;
+        }
+
         let font_size = f32::from(self.state.config.settings.terminal_font_size);
         let width = window.bounds().size.width.as_f32()
             - sidebar_width(self.state.sidebar_collapsed)
@@ -237,17 +292,23 @@ impl AppView {
         let columns = ((width / (font_size * 0.62)).floor() as u16).max(20);
         let rows = ((height / (font_size * 1.28)).floor() as u16).max(4);
 
+        let mut any_live = false;
         for (tab_id, runtime) in &mut self.terminals {
             let changed = runtime.poll();
-            if tab_id == &active_tab {
+            if active_is_terminal && active_tab.as_deref() == Some(tab_id.as_str()) {
                 runtime.resize(columns, rows);
             }
-            if changed {
+            if runtime.is_live() {
+                any_live = true;
+            }
+            if changed && active_is_terminal && active_tab.as_deref() == Some(tab_id.as_str()) {
                 cx.notify();
             }
         }
-        // 会话不断产生输出；在终端标签激活时持续请求下一帧。
-        window.request_animation_frame();
+        // 会话不断产生输出；仍有活动会话时持续请求下一帧。
+        if any_live {
+            window.request_animation_frame();
+        }
     }
 
     pub(crate) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -256,7 +317,7 @@ impl AppView {
         cx.notify();
     }
 
-    fn open_node_form(
+    pub(crate) fn open_node_form(
         &mut self,
         node_id: Option<&str>,
         window: &mut Window,
@@ -286,7 +347,8 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let prompt = PromptModal::create(title, initial, action, window, cx);
+        let masked = matches!(&action, PromptAction::ConnectNode(_));
+        let prompt = PromptModal::create(title, initial, action, masked, window, cx);
         let handle = prompt.input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         self.modal = Some(Modal::Prompt(prompt));
@@ -392,7 +454,7 @@ impl AppView {
         }
     }
 
-    fn save_prompt(&mut self, cx: &mut Context<Self>) {
+    fn save_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let strings = self.state.strings();
         let Some(Modal::Prompt(prompt)) = &self.modal else {
             return;
@@ -425,7 +487,7 @@ impl AppView {
                     let Some(tab_id) = self.state.active_tab.clone() else {
                         return;
                     };
-                    self.start_session(&tab_id, &node, self.passwords.get(&node_id).cloned(), cx);
+                    self.start_session(&tab_id, &node, self.passwords.get(&node_id).cloned(), window, cx);
                 }
                 cx.notify();
                 return;
@@ -932,7 +994,7 @@ fn prompt_panel(
                 },
             )))
             .child(primary_button(strings.save, palette).on_click(cx.listener(
-                |this, _, _, cx| this.save_prompt(cx),
+                |this, _, window, cx| this.save_prompt(window, cx),
             ))),
     )
 }

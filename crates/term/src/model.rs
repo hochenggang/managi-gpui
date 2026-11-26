@@ -138,6 +138,10 @@ impl TerminalModel {
         *self.term.mode()
     }
 
+    pub fn bracketed_paste(&self) -> bool {
+        self.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
     /// 复制可见区，供 GPUI 绘制。
     pub fn snapshot(&self) -> TerminalSnapshot {
         let offset = self.term.grid().display_offset() as i32;
@@ -184,10 +188,11 @@ impl TerminalModel {
         }
 
         let content = self.term.renderable_content();
+        let cursor_line = content.cursor.point.line.0 - content.display_offset as i32;
         TerminalSnapshot {
             rows,
             cursor: SnapshotCursor {
-                line: content.cursor.point.line.0.max(0) as usize,
+                line: cursor_line.max(0) as usize,
                 column: content.cursor.point.column.0,
                 visible: content.mode.contains(TermMode::SHOW_CURSOR),
             },

@@ -79,4 +79,12 @@ impl TerminalRuntime {
             TerminalStatus::Connecting | TerminalStatus::Connected
         )
     }
+
+    pub(crate) fn scroll(&mut self, lines: i32) {
+        self.model.scroll(lines);
+    }
+
+    pub(crate) fn bracketed_paste(&self) -> bool {
+        self.model.bracketed_paste()
+    }
 }

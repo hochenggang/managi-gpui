@@ -109,16 +109,20 @@ impl PromptModal {
         title: impl Into<String>,
         initial: Option<String>,
         action: PromptAction,
+        masked: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let title = title.into();
         let input = cx.new(|cx| {
-            let input = InputState::new(window, cx);
-            match initial {
-                Some(value) => input.default_value(value),
-                None => input,
+            let mut input = InputState::new(window, cx);
+            if let Some(value) = initial {
+                input = input.default_value(value);
             }
+            if masked {
+                input.set_masked(true, window, cx);
+            }
+            input
         });
         Self {
             title,
