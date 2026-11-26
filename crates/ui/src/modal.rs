@@ -2,7 +2,7 @@
 
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
-use managi_core::Node;
+use managi_core::{AuthKind, Node};
 
 use crate::i18n::Strings;
 use crate::state::new_node_id;
@@ -15,6 +15,8 @@ pub(crate) struct NodeForm {
     pub port: Entity<InputState>,
     pub username: Entity<InputState>,
     pub group: Entity<InputState>,
+    pub auth: AuthKind,
+    pub key_path: Entity<InputState>,
     pub error: Option<String>,
 }
 
@@ -64,6 +66,14 @@ impl NodeForm {
                 _ => input,
             }
         });
+        let key_path = cx.new(|cx| {
+            let input =
+                InputState::new(window, cx).placeholder(strings.key_path_placeholder);
+            match node {
+                Some(node) if !node.key_path.is_empty() => input.default_value(node.key_path.clone()),
+                _ => input,
+            }
+        });
 
         Self {
             node_id,
@@ -73,6 +83,8 @@ impl NodeForm {
             port,
             username,
             group,
+            auth: node.map(|node| node.auth).unwrap_or_default(),
+            key_path,
             error: None,
         }
     }
@@ -82,6 +94,7 @@ impl NodeForm {
 pub(crate) enum PromptAction {
     NewGroup,
     RenameGroup(String),
+    ConnectNode(String),
 }
 
 pub(crate) struct PromptModal {

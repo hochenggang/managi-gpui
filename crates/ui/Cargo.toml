@@ -10,3 +10,5 @@ repository.workspace = true
 [dependencies]
 gpui-kit = { workspace = true }
 managi-core = { path = "../core" }
+managi-term = { path = "../term" }
+managi-ssh = { path = "../ssh" }

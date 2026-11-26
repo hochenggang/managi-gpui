@@ -296,9 +296,9 @@ fn node_row(
                         .justify_center()
                         .cursor_pointer()
                         .hover(move |style| style.bg(palette.hover_bg))
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.state.open_node_tab(TabKind::Terminal, &terminal_node);
+                            this.open_terminal(&terminal_node, window, cx);
                             cx.notify();
                         }))
                         .child(icon(icons::TERMINAL, 13.6, palette.font_3)),

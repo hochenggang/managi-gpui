@@ -108,8 +108,7 @@ pub(crate) fn render(
                         .hover(move |style| style.text_color(palette.red))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
-                            this.state.close_tab(&close_id);
-                            cx.notify();
+                            this.close_tab(&close_id, cx);
                         }))
                         .child("×"),
                 )

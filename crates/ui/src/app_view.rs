@@ -1,16 +1,20 @@
 //! 根视图：布局装配、右键菜单、弹窗，以及所有会改配置的动作。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use managi_core::{Config, Node};
+use managi_ssh::{AuthMethod, ConnectRequest, SessionHandle};
+use managi_term::encode_key;
 
 use crate::i18n::Strings;
 use crate::menu::{MenuAction, MenuItem, MenuState};
 use crate::modal::{ConfirmAction, ConfirmModal, Modal, NodeForm, PromptAction, PromptModal};
 use crate::state::{AppState, TabKind};
+use crate::terminal_runtime::TerminalRuntime;
 use crate::theme::{self, Palette};
 use crate::widgets::text_input;
 
@@ -23,6 +27,9 @@ pub struct AppView {
     pub(crate) search: Entity<InputState>,
     pub(crate) modal: Option<Modal>,
     pub(crate) menu: Option<MenuState>,
+    pub(crate) terminals: HashMap<String, TerminalRuntime>,
+    pub(crate) passwords: HashMap<String, String>,
+    pub(crate) term_focus: FocusHandle,
 }
 
 impl AppView {
@@ -55,10 +62,201 @@ impl AppView {
             search,
             modal: None,
             menu: None,
+            terminals: HashMap::new(),
+            passwords: HashMap::new(),
+            term_focus: cx.focus_handle(),
         }
     }
 
-    pub(crate) fn open_node_form(
+    pub(crate) fn open_terminal(
+        &mut self,
+        node: &Node,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.open_node_tab(TabKind::Terminal, node);
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if self.terminals.contains_key(&tab_id) {
+            cx.notify();
+            return;
+        }
+
+        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+            self.start_session(&tab_id, node, None, cx);
+        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+            self.start_session(&tab_id, node, Some(password), cx);
+        } else {
+            let strings = self.state.strings();
+            self.open_prompt(
+                format!("{} {}", strings.connect_prefix, node.name),
+                None,
+                PromptAction::ConnectNode(node.id.clone()),
+                window,
+                cx,
+            );
+        }
+    }
+
+    fn start_session(
+        &mut self,
+        tab_id: &str,
+        node: &Node,
+        password: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let auth = match node.auth {
+            managi_core::AuthKind::Password => {
+                let Some(password) = password else {
+                    return;
+                };
+                AuthMethod::Password(password)
+            }
+            managi_core::AuthKind::PrivateKey => AuthMethod::PrivateKey {
+                path: PathBuf::from(node.key_path.trim()),
+                passphrase: self.passwords.get(&node.id).cloned(),
+            },
+        };
+
+        let known_hosts_path = self
+            .state
+            .config_path
+            .parent()
+            .map(|parent| parent.join("known_hosts"))
+            .unwrap_or_else(|| PathBuf::from("known_hosts"));
+
+        let request = ConnectRequest {
+            host: node.host.clone(),
+            port: node.port,
+            username: node.username.clone(),
+            auth,
+            known_hosts_path,
+            columns: 80,
+            rows: 24,
+        };
+
+        match managi_ssh::session::spawn(request) {
+            Ok(handle) => {
+                self.terminals.insert(
+                    tab_id.to_string(),
+                    TerminalRuntime::new(handle, 80, 24),
+                );
+            }
+            Err(error) => {
+                self.state.notice = Some(error.to_string());
+            }
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn reconnect_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let node = self
+            .state
+            .active_tab()
+            .and_then(|tab| tab.node.clone());
+        let Some(node) = node else {
+            return;
+        };
+        self.terminals.remove(&tab_id);
+
+        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+            self.start_session(&tab_id, &node, None, cx);
+        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+            self.start_session(&tab_id, &node, Some(password), cx);
+        } else {
+            let strings = self.state.strings();
+            self.open_prompt(
+                format!("{} {}", strings.connect_prefix, node.name),
+                None,
+                PromptAction::ConnectNode(node.id.clone()),
+                window,
+                cx,
+            );
+        }
+    }
+
+    pub(crate) fn handle_terminal_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+            return;
+        };
+        if !runtime.is_live() {
+            return;
+        }
+        let keystroke = &event.keystroke;
+        let mode = runtime.model.mode();
+        if let Some(bytes) = encode_key(
+            &keystroke.key,
+            keystroke.key_char.as_deref(),
+            keystroke.modifiers.control,
+            keystroke.modifiers.alt,
+            keystroke.modifiers.shift,
+            mode,
+        ) {
+            runtime.handle.write(bytes);
+        }
+        cx.notify();
+    }
+
+    fn poll_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(active_tab) = self.state.active_tab.clone() else {
+            return;
+        };
+        let terminal_tab = self
+            .state
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::Terminal);
+        if !terminal_tab || !self.terminals.contains_key(&active_tab) {
+            return;
+        }
+
+        let valid_tabs: Vec<String> = self
+            .state
+            .tabs
+            .iter()
+            .map(|tab| tab.id.clone())
+            .collect();
+        self.terminals
+            .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
+
+        let font_size = f32::from(self.state.config.settings.terminal_font_size);
+        let width = window.bounds().size.width.as_f32()
+            - sidebar_width(self.state.sidebar_collapsed)
+            - 16.0;
+        let height = window.bounds().size.height.as_f32() - BAR_HEIGHT * 2.0 - 16.0;
+        let columns = ((width / (font_size * 0.62)).floor() as u16).max(20);
+        let rows = ((height / (font_size * 1.28)).floor() as u16).max(4);
+
+        for (tab_id, runtime) in &mut self.terminals {
+            let changed = runtime.poll();
+            if tab_id == &active_tab {
+                runtime.resize(columns, rows);
+            }
+            if changed {
+                cx.notify();
+            }
+        }
+        // 会话不断产生输出；在终端标签激活时持续请求下一帧。
+        window.request_animation_frame();
+    }
+
+    pub(crate) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.terminals.remove(id);
+        self.state.close_tab(id);
+        cx.notify();
+    }
+
+    fn open_node_form(
         &mut self,
         node_id: Option<&str>,
         window: &mut Window,
@@ -126,6 +324,8 @@ impl AppView {
         let port_text = form.port.read(cx).value().trim().to_string();
         let username = form.username.read(cx).value().trim().to_string();
         let group = form.group.read(cx).value().trim().to_string();
+        let auth = form.auth;
+        let key_path = form.key_path.read(cx).value().trim().to_string();
 
         if name.is_empty() {
             self.set_modal_error(strings.empty_name.to_string());
@@ -142,6 +342,11 @@ impl AppView {
             cx.notify();
             return;
         }
+        if auth == managi_core::AuthKind::PrivateKey && key_path.is_empty() {
+            self.set_modal_error(strings.key_path_required.to_string());
+            cx.notify();
+            return;
+        }
         let port = match port_text.parse::<u16>() {
             Ok(port) if port > 0 => port,
             _ => {
@@ -153,6 +358,8 @@ impl AppView {
 
         let mut node = Node::new(node_id.clone(), name, host, port, username);
         node.group = group.clone();
+        node.auth = auth;
+        node.key_path = key_path;
 
         if editing {
             match self
@@ -194,12 +401,35 @@ impl AppView {
         let action = prompt.action.clone();
 
         if value.is_empty() {
-            self.set_modal_error(strings.name_required.to_string());
+            let message = match &action {
+                PromptAction::ConnectNode(_) => strings.password_required,
+                _ => strings.name_required,
+            };
+            self.set_modal_error(message.to_string());
             cx.notify();
             return;
         }
 
         match action {
+            PromptAction::ConnectNode(node_id) => {
+                self.passwords.insert(node_id.clone(), value);
+                let node = self
+                    .state
+                    .config
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == node_id)
+                    .cloned();
+                self.modal = None;
+                if let Some(node) = node {
+                    let Some(tab_id) = self.state.active_tab.clone() else {
+                        return;
+                    };
+                    self.start_session(&tab_id, &node, self.passwords.get(&node_id).cloned(), cx);
+                }
+                cx.notify();
+                return;
+            }
             PromptAction::NewGroup => {
                 if self.state.config.groups.iter().any(|name| name == &value) {
                     self.set_modal_error(strings.group_exists.to_string());
@@ -342,14 +572,18 @@ impl AppView {
                 self.open_confirm(message, ConfirmAction::DeleteGroup(group), cx);
             }
             MenuAction::CloseTab(id) => {
-                self.state.close_tab(&id);
-                cx.notify();
+                self.close_tab(&id, cx);
             }
             MenuAction::CloseOthers(id) => {
+                let keep = self.state.tabs.iter().find(|tab| tab.id == id);
+                let keep_id = keep.map(|tab| tab.id.clone());
+                self.terminals
+                    .retain(|tab_id, _| keep_id.as_deref() == Some(tab_id.as_str()));
                 self.state.close_others(&id);
                 cx.notify();
             }
             MenuAction::CloseAll => {
+                self.terminals.clear();
                 self.state.close_all();
                 cx.notify();
             }
@@ -459,12 +693,20 @@ impl AppView {
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.poll_terminals(window, cx);
         let palette = theme::palette(self.state.config.settings.theme);
         let strings = self.state.strings();
 
         let sidebar = crate::sidebar::render(&self.state, &self.search, &strings, palette, window, cx);
         let tabs = crate::tab_bar::render(&self.state, &strings, palette, cx);
-        let workspace = crate::workspace::render(&self.state, &strings, palette, cx);
+        let workspace = crate::workspace::render(
+            &self.state,
+            &strings,
+            palette,
+            &self.terminals,
+            &self.term_focus,
+            cx,
+        );
 
         let mut root = div()
             .relative()
@@ -580,10 +822,39 @@ fn node_form_panel(
             palette,
         ))
         .child(field(
+            strings.auth_type,
+            div()
+                .flex()
+                .gap(px(6.0))
+                .child(auth_choice(
+                    "auth-password",
+                    strings.auth_password,
+                    form.auth == managi_core::AuthKind::Password,
+                    palette,
+                    cx,
+                ))
+                .child(auth_choice(
+                    "auth-key",
+                    strings.auth_key,
+                    form.auth == managi_core::AuthKind::PrivateKey,
+                    palette,
+                    cx,
+                )),
+            palette,
+        ))
+        .child(field(
             strings.field_group,
             text_input(&form.group, palette, 32.0, 14.4, window, cx),
             palette,
         ));
+
+    if form.auth == managi_core::AuthKind::PrivateKey {
+        panel = panel.child(field(
+            strings.key_path,
+            text_input(&form.key_path, palette, 32.0, 14.4, window, cx),
+            palette,
+        ));
+    }
 
     if let Some(error) = &form.error {
         panel = panel.child(
@@ -767,8 +1038,55 @@ fn menu_layer(menu: &MenuState, palette: Palette, cx: &mut Context<AppView>) -> 
         .into_any_element()
 }
 
-fn field(label: &'static str, input: impl IntoElement, palette: Palette) -> Div {
+fn auth_choice(
+    id: &'static str,
+    label: &'static str,
+    selected: bool,
+    palette: Palette,
+    cx: &mut Context<AppView>,
+) -> Stateful<Div> {
+    let background = if selected {
+        palette.selected_bg
+    } else {
+        palette.panel_bg
+    };
+    let text_color = if selected {
+        palette.accent
+    } else {
+        palette.font_2
+    };
+    let target = if id == "auth-key" {
+        managi_core::AuthKind::PrivateKey
+    } else {
+        managi_core::AuthKind::Password
+    };
+
     div()
+        .id(id)
+        .h(px(30.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .border_1()
+        .border_color(if selected {
+            palette.accent
+        } else {
+            palette.border
+        })
+        .bg(background)
+        .text_size(px(12.8))
+        .text_color(text_color)
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if let Some(Modal::Node(form)) = &mut this.modal {
+                form.auth = target;
+            }
+            cx.notify();
+        }))
+        .child(label.to_string())
+}
+
+fn field(label: &'static str, input: impl IntoElement, palette: Palette) -> Div {    div()
         .flex()
         .flex_col()
         .gap(px(4.0))

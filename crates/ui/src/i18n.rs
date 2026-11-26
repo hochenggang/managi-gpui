@@ -69,6 +69,19 @@ pub(crate) struct Strings {
     pub delete_group_message: &'static str,
     pub name_required: &'static str,
     pub group_exists: &'static str,
+    pub connect_prefix: &'static str,
+    pub password_placeholder: &'static str,
+    pub password_required: &'static str,
+    pub connecting: &'static str,
+    pub connected: &'static str,
+    pub disconnected: &'static str,
+    pub reconnect: &'static str,
+    pub auth_type: &'static str,
+    pub auth_password: &'static str,
+    pub auth_key: &'static str,
+    pub key_path: &'static str,
+    pub key_path_placeholder: &'static str,
+    pub key_path_required: &'static str,
 }
 
 pub(crate) const ZH: Strings = Strings {
@@ -137,6 +150,19 @@ pub(crate) const ZH: Strings = Strings {
     delete_group_message: "删除分组后，组内节点会移到未分组。",
     name_required: "名称不能为空",
     group_exists: "分组已存在",
+    connect_prefix: "连接到",
+    password_placeholder: "SSH 密码",
+    password_required: "密码不能为空",
+    connecting: "正在连接…",
+    connected: "已连接",
+    disconnected: "已断开",
+    reconnect: "重新连接",
+    auth_type: "认证方式",
+    auth_password: "密码",
+    auth_key: "私钥",
+    key_path: "私钥路径",
+    key_path_placeholder: "例如 C:\\Users\\你\\.ssh\\id_ed25519",
+    key_path_required: "请填写私钥路径",
 };
 
 pub(crate) const EN: Strings = Strings {
@@ -205,6 +231,19 @@ pub(crate) const EN: Strings = Strings {
     delete_group_message: "Nodes in this group will move to ungrouped.",
     name_required: "Name cannot be empty",
     group_exists: "Group already exists",
+    connect_prefix: "Connect to",
+    password_placeholder: "SSH password",
+    password_required: "Password cannot be empty",
+    connecting: "Connecting…",
+    connected: "Connected",
+    disconnected: "Disconnected",
+    reconnect: "Reconnect",
+    auth_type: "Authentication",
+    auth_password: "Password",
+    auth_key: "Private key",
+    key_path: "Key path",
+    key_path_placeholder: "e.g. C:\\Users\\you\\.ssh\\id_ed25519",
+    key_path_required: "Private key path is required",
 };
 
 impl Strings {
