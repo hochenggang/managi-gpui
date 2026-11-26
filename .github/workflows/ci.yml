@@ -63,13 +63,13 @@ jobs:
           cache-on-failure: true
 
       - name: 构建（release）
-        run: cargo build --release --bins
+        run: cargo build --release --bins --locked
 
       - name: 单元测试（纯逻辑 crate）
-        run: cargo test -p managi-core -p managi-term -p managi-ssh
+        run: cargo test -p managi-core -p managi-term -p managi-ssh --locked
 
       - name: 无窗口自检
-        run: cargo run --release -p managi-app --bin managi-gpui-selftest
+        run: cargo run --locked --release -p managi-app --bin managi-gpui-selftest
 
       - name: 上传可执行产物
         uses: actions/upload-artifact@v4

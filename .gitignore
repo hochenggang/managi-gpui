@@ -1,6 +1,7 @@
 # build output
 /target
 **/target
+/dist
 
 # local credentials — never commit
 managi-gpui-pat.txt
