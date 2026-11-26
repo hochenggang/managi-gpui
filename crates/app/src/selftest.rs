@@ -20,19 +20,19 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 
     let loaded = Config::load(paths.config_file())?;
     if loaded.nodes.len() != 1 {
-        return Err(io_error("配置读写自检失败：节点数量不一致"));
+        return Err(io_error("配置读写自检失败：节点数量不一致").into());
     }
 
     let mut term = TerminalModel::new(TerminalSize::new(40, 6), 1000);
     term.advance(b"hello\x1b[31m red\x1b[0m\r\nworld");
     let screen = term.screen_text();
     if !screen.contains("hello red") || !screen.contains("world") {
-        return Err(io_error(format!("终端解析自检失败：{screen:?}")));
+        return Err(io_error(format!("终端解析自检失败：{screen:?}")).into());
     }
 
     let target = managi_ssh::SshTarget::new("127.0.0.1", 22, "root")?;
     if target.authority() != "127.0.0.1:22" {
-        return Err(io_error("SSH 目标校验自检失败"));
+        return Err(io_error("SSH 目标校验自检失败").into());
     }
 
     println!("config: {}", paths.config_file().display());

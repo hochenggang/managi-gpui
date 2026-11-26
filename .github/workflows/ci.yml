@@ -62,11 +62,6 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: macOS Metal 工具链
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        run: xcodebuild -downloadComponent MetalToolchain
-
       - name: 构建（release）
         run: cargo build --release --bins
 
