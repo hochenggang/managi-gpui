@@ -725,7 +725,8 @@ fn menu_layer(menu: &MenuState, palette: Palette, cx: &mut Context<AppView>) -> 
         .py(px(6.0))
         .bg(palette.panel_bg)
         .border_1()
-        .border_color(palette.border);
+        .border_color(palette.border)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
     for (index, item) in menu.items.iter().enumerate() {
         let action = item.action.clone();
@@ -758,18 +759,10 @@ fn menu_layer(menu: &MenuState, palette: Palette, cx: &mut Context<AppView>) -> 
         .top(px(0.0))
         .w_full()
         .h_full()
-        .child(
-            div()
-                .absolute()
-                .left(px(0.0))
-                .top(px(0.0))
-                .w_full()
-                .h_full()
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                    this.menu = None;
-                    cx.notify();
-                })),
-        )
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            this.menu = None;
+            cx.notify();
+        }))
         .child(panel)
         .into_any_element()
 }
