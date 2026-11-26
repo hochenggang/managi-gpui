@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 russh = { workspace = true }
+russh-sftp = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

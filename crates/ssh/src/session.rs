@@ -132,7 +132,7 @@ pub fn spawn(request: ConnectRequest) -> Result<SessionHandle, SessionError> {
     })
 }
 
-struct ClientHandler {
+pub(crate) struct ClientHandler {
     host: String,
     port: u16,
     known_hosts_path: PathBuf,
@@ -177,27 +177,8 @@ async fn run(
     mut command_rx: UnboundedReceiver<Command>,
     events: mpsc::Sender<SessionEvent>,
 ) -> Result<(), String> {
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(60)),
-        nodelay: true,
-        ..client::Config::default()
-    });
-    let handler = ClientHandler {
-        host: request.host.clone(),
-        port: request.port,
-        known_hosts_path: request.known_hosts_path.clone(),
-    };
-
-    let connect = tokio::time::timeout(
-        Duration::from_secs(20),
-        client::connect(config, (request.host.as_str(), request.port), handler),
-    )
-    .await
-    .map_err(|_| "连接超时（20 秒）".to_string())?
-    .map_err(|error| format!("连接失败: {error}"))?;
-
-    let mut session: Handle<ClientHandler> = connect;
-    authenticate(&mut session, &request).await?;
+    let connect = connect_and_authenticate(&request).await?;
+    let mut session = connect;
 
     let mut channel = session
         .channel_open_session()
@@ -270,6 +251,34 @@ async fn run(
         .await;
     let _ = events.send(SessionEvent::Closed("连接已关闭".into()));
     Ok(())
+}
+
+/// 建立连接并完成认证；终端、SFTP、批量执行共用同一套超时与 TOFU 策略。
+pub(crate) async fn connect_and_authenticate(
+    request: &ConnectRequest,
+) -> Result<Handle<ClientHandler>, String> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(60)),
+        nodelay: true,
+        ..client::Config::default()
+    });
+    let handler = ClientHandler {
+        host: request.host.clone(),
+        port: request.port,
+        known_hosts_path: request.known_hosts_path.clone(),
+    };
+
+    let connect = tokio::time::timeout(
+        Duration::from_secs(20),
+        client::connect(config, (request.host.as_str(), request.port), handler),
+    )
+    .await
+    .map_err(|_| "连接超时（20 秒）".to_string())?
+    .map_err(|error| format!("连接失败: {error}"))?;
+
+    let mut session: Handle<ClientHandler> = connect;
+    authenticate(&mut session, request).await?;
+    Ok(session)
 }
 
 async fn authenticate(

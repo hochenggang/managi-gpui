@@ -208,9 +208,10 @@ impl TerminalModel {
 
     /// 可见区的纯文本快照，用于自检/复制/调试，不用于绘制。
     pub fn screen_text(&self) -> String {
+        let offset = self.term.grid().display_offset() as i32;
         let mut out = String::with_capacity(self.size.screen_lines * (self.size.columns + 1));
         for line in 0..self.size.screen_lines {
-            let row = &self.term.grid()[Line(line as i32)];
+            let row = &self.term.grid()[Line(line as i32 - offset)];
             let mut text = String::with_capacity(self.size.columns);
             for column in 0..self.size.columns {
                 text.push(row[Column(column)].c);

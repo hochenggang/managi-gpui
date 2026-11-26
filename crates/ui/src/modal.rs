@@ -5,7 +5,7 @@ use gpui_kit::*;
 use managi_core::{AuthKind, Node};
 
 use crate::i18n::Strings;
-use crate::state::new_node_id;
+use crate::state::{TabKind, new_node_id};
 
 pub(crate) struct NodeForm {
     pub node_id: String,
@@ -94,7 +94,9 @@ impl NodeForm {
 pub(crate) enum PromptAction {
     NewGroup,
     RenameGroup(String),
-    ConnectNode(String),
+    ConnectNode { node_id: String, kind: TabKind },
+    SftpMkdir(String),
+    SftpUpload(String),
 }
 
 pub(crate) struct PromptModal {
@@ -109,13 +111,14 @@ impl PromptModal {
         title: impl Into<String>,
         initial: Option<String>,
         action: PromptAction,
+        placeholder: &'static str,
         masked: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let title = title.into();
         let input = cx.new(|cx| {
-            let mut input = InputState::new(window, cx);
+            let mut input = InputState::new(window, cx).placeholder(placeholder);
             if let Some(value) = initial {
                 input = input.default_value(value);
             }
@@ -137,6 +140,11 @@ impl PromptModal {
 pub(crate) enum ConfirmAction {
     DeleteNode(String),
     DeleteGroup(String),
+    SftpDelete {
+        tab_id: String,
+        name: String,
+        is_dir: bool,
+    },
 }
 
 pub(crate) struct ConfirmModal {

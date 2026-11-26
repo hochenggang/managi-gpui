@@ -1,16 +1,19 @@
-//! 工作区：按激活标签分派到终端、SFTP 占位、批量占位或设置页。
+//! 工作区：按激活标签分派到终端、SFTP、批量执行或设置页。
 
 use std::collections::HashMap;
 
+use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app_view::AppView;
 use crate::assets::icons;
+use crate::batch_runtime::BatchRuntime;
 use crate::i18n::Strings;
+use crate::sftp_runtime::SftpRuntime;
 use crate::state::{AppState, TabKind};
 use crate::terminal_runtime::TerminalRuntime;
-use crate::theme::{self, Palette};
+use crate::theme::Palette;
 use crate::widgets::icon;
 
 pub(crate) fn render(
@@ -18,7 +21,12 @@ pub(crate) fn render(
     strings: &Strings,
     palette: Palette,
     terminals: &HashMap<String, TerminalRuntime>,
+    sftp: &HashMap<String, SftpRuntime>,
+    batches: &HashMap<String, BatchRuntime>,
+    batch_command: &Entity<InputState>,
     focus: &FocusHandle,
+    quick_open: bool,
+    window: &Window,
     cx: &mut Context<AppView>,
 ) -> Div {
     let body = match state.active_tab() {
@@ -30,11 +38,26 @@ pub(crate) fn render(
                 strings,
                 palette,
                 f32::from(state.config.settings.terminal_font_size),
+                state.config.settings.language,
+                quick_open,
                 focus,
                 cx,
             ),
-            TabKind::Sftp => notice_panel(strings.sftp_notice, palette),
-            TabKind::Batch => notice_panel(strings.batch_notice, palette),
+            TabKind::Sftp => crate::sftp_view::render(
+                sftp.get(&tab.id),
+                tab.node.as_ref(),
+                strings,
+                palette,
+                cx,
+            ),
+            TabKind::Batch => crate::batch_view::render(
+                batches.get(&tab.id),
+                batch_command,
+                strings,
+                palette,
+                window,
+                cx,
+            ),
             TabKind::Settings => crate::settings_view::render(state, strings, palette, cx),
         },
     };
@@ -70,16 +93,4 @@ fn empty_state(strings: &Strings, palette: Palette) -> Div {
                 .text_color(palette.font_3)
                 .child(strings.empty_hint.to_string()),
         )
-}
-
-fn notice_panel(message: &'static str, palette: Palette) -> Div {
-    div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(palette.bg)
-        .text_size(px(11.2))
-        .text_color(palette.font_3)
-        .child(message.to_string())
 }

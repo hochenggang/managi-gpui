@@ -82,6 +82,34 @@ pub(crate) struct Strings {
     pub key_path: &'static str,
     pub key_path_placeholder: &'static str,
     pub key_path_required: &'static str,
+    pub quick_commands: &'static str,
+    pub sftp_loading: &'static str,
+    pub sftp_empty: &'static str,
+    pub sftp_name: &'static str,
+    pub sftp_size: &'static str,
+    pub sftp_modified: &'static str,
+    pub sftp_up: &'static str,
+    pub sftp_refresh: &'static str,
+    pub sftp_new_dir: &'static str,
+    pub sftp_upload: &'static str,
+    pub sftp_download: &'static str,
+    pub sftp_delete: &'static str,
+    pub sftp_delete_confirm: &'static str,
+    pub sftp_upload_title: &'static str,
+    pub sftp_upload_placeholder: &'static str,
+    pub sftp_dir_placeholder: &'static str,
+    pub sftp_local_required: &'static str,
+    pub sftp_no_selection: &'static str,
+    pub batch_command_placeholder: &'static str,
+    pub batch_run: &'static str,
+    pub batch_stop: &'static str,
+    pub batch_stop_all: &'static str,
+    pub batch_no_selection: &'static str,
+    pub batch_no_password: &'static str,
+    pub batch_empty: &'static str,
+    pub batch_running: &'static str,
+    pub batch_stopped: &'static str,
+    pub batch_exit: &'static str,
 }
 
 pub(crate) const ZH: Strings = Strings {
@@ -163,6 +191,34 @@ pub(crate) const ZH: Strings = Strings {
     key_path: "私钥路径",
     key_path_placeholder: "例如 C:\\Users\\你\\.ssh\\id_ed25519",
     key_path_required: "请填写私钥路径",
+    quick_commands: "快捷命令",
+    sftp_loading: "正在读取目录…",
+    sftp_empty: "空目录",
+    sftp_name: "名称",
+    sftp_size: "大小",
+    sftp_modified: "修改时间",
+    sftp_up: "上一级",
+    sftp_refresh: "刷新",
+    sftp_new_dir: "新建目录",
+    sftp_upload: "上传",
+    sftp_download: "下载",
+    sftp_delete: "删除",
+    sftp_delete_confirm: "删除",
+    sftp_upload_title: "上传本地文件",
+    sftp_upload_placeholder: "输入本地文件绝对路径",
+    sftp_dir_placeholder: "输入目录名称",
+    sftp_local_required: "本地文件路径不能为空",
+    sftp_no_selection: "先选中一个文件",
+    batch_command_placeholder: "输入要在所选主机上执行的命令",
+    batch_run: "执行",
+    batch_stop: "停止",
+    batch_stop_all: "全部停止",
+    batch_no_selection: "先在左侧勾选要执行的主机",
+    batch_no_password: "没有缓存密码：请先手动连接一次该主机",
+    batch_empty: "勾选左侧主机后执行命令，结果会按主机分卡片展示。",
+    batch_running: "执行中…",
+    batch_stopped: "已停止",
+    batch_exit: "退出码",
 };
 
 pub(crate) const EN: Strings = Strings {
@@ -244,6 +300,34 @@ pub(crate) const EN: Strings = Strings {
     key_path: "Key path",
     key_path_placeholder: "e.g. C:\\Users\\you\\.ssh\\id_ed25519",
     key_path_required: "Private key path is required",
+    quick_commands: "Quick Commands",
+    sftp_loading: "Loading directory…",
+    sftp_empty: "Empty directory",
+    sftp_name: "Name",
+    sftp_size: "Size",
+    sftp_modified: "Modified",
+    sftp_up: "Parent",
+    sftp_refresh: "Refresh",
+    sftp_new_dir: "New Folder",
+    sftp_upload: "Upload",
+    sftp_download: "Download",
+    sftp_delete: "Delete",
+    sftp_delete_confirm: "Delete",
+    sftp_upload_title: "Upload local file",
+    sftp_upload_placeholder: "Absolute path to a local file",
+    sftp_dir_placeholder: "Folder name",
+    sftp_local_required: "Local file path is required",
+    sftp_no_selection: "Select a file first",
+    batch_command_placeholder: "Command to run on the selected hosts",
+    batch_run: "Run",
+    batch_stop: "Stop",
+    batch_stop_all: "Stop All",
+    batch_no_selection: "Tick hosts in the sidebar first",
+    batch_no_password: "No cached password: connect to this host manually once",
+    batch_empty: "Tick hosts on the left, run a command, and results appear as cards per host.",
+    batch_running: "Running…",
+    batch_stopped: "Stopped",
+    batch_exit: "Exit code",
 };
 
 impl Strings {
@@ -252,5 +336,47 @@ impl Strings {
             Language::Zh => ZH,
             Language::En => EN,
         }
+    }
+}
+
+pub(crate) struct QuickCommand {
+    pub label: &'static str,
+    pub command: &'static str,
+}
+
+pub(crate) const QUICK_COMMANDS_ZH: &[QuickCommand] = &[
+    QuickCommand { label: "系统信息", command: "uname -a && (lsb_release -a 2>/dev/null || cat /etc/os-release)" },
+    QuickCommand { label: "CPU 占用", command: "top -bn1 | head -15" },
+    QuickCommand { label: "内存", command: "free -h" },
+    QuickCommand { label: "磁盘", command: "df -h" },
+    QuickCommand { label: "进程 Top20", command: "ps aux --sort=-%cpu | head -20" },
+    QuickCommand { label: "运行时长", command: "uptime" },
+    QuickCommand { label: "IP 地址", command: "ip addr" },
+    QuickCommand { label: "路由表", command: "ip route" },
+    QuickCommand { label: "监听端口", command: "ss -tlnp" },
+    QuickCommand { label: "大文件 Top10", command: "find / -type f -size +100M -exec ls -lh {} \\; 2>/dev/null | head -10" },
+    QuickCommand { label: "系统日志尾部", command: "tail -n 50 /var/log/syslog" },
+    QuickCommand { label: "连通性测试", command: "ping -c 4 8.8.8.8" },
+];
+
+pub(crate) const QUICK_COMMANDS_EN: &[QuickCommand] = &[
+    QuickCommand { label: "System Info", command: "uname -a && (lsb_release -a 2>/dev/null || cat /etc/os-release)" },
+    QuickCommand { label: "CPU Load", command: "top -bn1 | head -15" },
+    QuickCommand { label: "Memory", command: "free -h" },
+    QuickCommand { label: "Disk", command: "df -h" },
+    QuickCommand { label: "Top Processes", command: "ps aux --sort=-%cpu | head -20" },
+    QuickCommand { label: "Uptime", command: "uptime" },
+    QuickCommand { label: "IP Addresses", command: "ip addr" },
+    QuickCommand { label: "Routes", command: "ip route" },
+    QuickCommand { label: "Listening Ports", command: "ss -tlnp" },
+    QuickCommand { label: "Large Files", command: "find / -type f -size +100M -exec ls -lh {} \\; 2>/dev/null | head -10" },
+    QuickCommand { label: "Syslog Tail", command: "tail -n 50 /var/log/syslog" },
+    QuickCommand { label: "Ping Test", command: "ping -c 4 8.8.8.8" },
+];
+
+pub(crate) fn quick_commands(language: Language) -> &'static [QuickCommand] {
+    match language {
+        Language::Zh => QUICK_COMMANDS_ZH,
+        Language::En => QUICK_COMMANDS_EN,
     }
 }

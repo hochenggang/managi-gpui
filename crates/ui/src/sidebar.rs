@@ -313,9 +313,9 @@ fn node_row(
                         .justify_center()
                         .cursor_pointer()
                         .hover(move |style| style.bg(palette.hover_bg))
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.state.open_node_tab(TabKind::Sftp, &sftp_node);
+                            this.open_sftp(&sftp_node, window, cx);
                             cx.notify();
                         }))
                         .child(icon(icons::FOLDER, 13.6, palette.font_3)),
@@ -357,6 +357,21 @@ fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> impl
                     cx.notify();
                 }))
                 .child(icon(chevron, 16.0, palette.font_2)),
+        )
+        .child(
+            div()
+                .id("sidebar-batch")
+                .w(px(28.0))
+                .h(px(28.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(move |style| style.bg(palette.hover_bg))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.open_batch(cx);
+                }))
+                .child(icon(icons::BATCH, 16.0, palette.font_2)),
         )
         .child(
             div()

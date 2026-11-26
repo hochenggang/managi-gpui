@@ -5,10 +5,14 @@
 
 mod app_view;
 mod assets;
+mod batch_runtime;
+mod batch_view;
 mod i18n;
 mod menu;
 mod modal;
 mod settings_view;
+mod sftp_runtime;
+mod sftp_view;
 mod sidebar;
 mod state;
 mod tab_bar;

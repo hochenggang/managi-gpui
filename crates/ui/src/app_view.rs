@@ -2,17 +2,20 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use managi_core::{Config, Node};
-use managi_ssh::{AuthMethod, ConnectRequest, SessionHandle};
+use managi_ssh::{AuthMethod, ConnectRequest};
 use managi_term::encode_key;
 
+use crate::batch_runtime::BatchRuntime;
 use crate::i18n::Strings;
 use crate::menu::{MenuAction, MenuItem, MenuState};
 use crate::modal::{ConfirmAction, ConfirmModal, Modal, NodeForm, PromptAction, PromptModal};
+use crate::sftp_runtime::{SftpRuntime, join_path};
 use crate::state::{AppState, TabKind};
 use crate::terminal_runtime::TerminalRuntime;
 use crate::theme::{self, Palette};
@@ -25,11 +28,16 @@ pub(crate) const BAR_HEIGHT: f32 = 32.0;
 pub struct AppView {
     pub(crate) state: AppState,
     pub(crate) search: Entity<InputState>,
+    pub(crate) batch_command: Entity<InputState>,
     pub(crate) modal: Option<Modal>,
     pub(crate) menu: Option<MenuState>,
     pub(crate) terminals: HashMap<String, TerminalRuntime>,
+    pub(crate) sftp: HashMap<String, SftpRuntime>,
+    pub(crate) batches: HashMap<String, BatchRuntime>,
     pub(crate) passwords: HashMap<String, String>,
     pub(crate) term_focus: FocusHandle,
+    pub(crate) quick_open: bool,
+    last_sftp_click: Option<(String, String, Instant)>,
 }
 
 impl AppView {
@@ -57,14 +65,23 @@ impl AppView {
         })
         .detach();
 
+        let batch_command = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(strings.batch_command_placeholder)
+        });
+
         Self {
             state,
             search,
+            batch_command,
             modal: None,
             menu: None,
             terminals: HashMap::new(),
+            sftp: HashMap::new(),
+            batches: HashMap::new(),
             passwords: HashMap::new(),
             term_focus: cx.focus_handle(),
+            quick_open: false,
+            last_sftp_click: None,
         }
     }
 
@@ -92,11 +109,88 @@ impl AppView {
             self.open_prompt(
                 format!("{} {}", strings.connect_prefix, node.name),
                 None,
-                PromptAction::ConnectNode(node.id.clone()),
+                PromptAction::ConnectNode {
+                    node_id: node.id.clone(),
+                    kind: TabKind::Terminal,
+                },
                 window,
                 cx,
             );
         }
+    }
+
+    pub(crate) fn open_sftp(
+        &mut self,
+        node: &Node,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.open_node_tab(TabKind::Sftp, node);
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if self.sftp.contains_key(&tab_id) {
+            cx.notify();
+            return;
+        }
+
+        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+            self.start_sftp(&tab_id, node, None, window, cx);
+        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+            self.start_sftp(&tab_id, node, Some(password), window, cx);
+        } else {
+            let strings = self.state.strings();
+            self.open_prompt(
+                format!("{} {}", strings.connect_prefix, node.name),
+                None,
+                PromptAction::ConnectNode {
+                    node_id: node.id.clone(),
+                    kind: TabKind::Sftp,
+                },
+                window,
+                cx,
+            );
+        }
+    }
+
+    fn connect_request(
+        &self,
+        node: &Node,
+        password: Option<String>,
+    ) -> Option<ConnectRequest> {
+        let auth = match node.auth {
+            managi_core::AuthKind::Password => {
+                let password = password.or_else(|| self.passwords.get(&node.id).cloned())?;
+                AuthMethod::Password(password)
+            }
+            managi_core::AuthKind::PrivateKey => {
+                let path = node.key_path.trim();
+                if path.is_empty() {
+                    return None;
+                }
+                AuthMethod::PrivateKey {
+                    path: PathBuf::from(path),
+                    passphrase: self.passwords.get(&node.id).cloned(),
+                }
+            }
+        };
+
+        let known_hosts_path = self
+            .state
+            .config_path
+            .parent()
+            .map(|parent| parent.join("known_hosts"))
+            .unwrap_or_else(|| PathBuf::from("known_hosts"));
+
+        Some(ConnectRequest {
+            host: node.host.clone(),
+            port: node.port,
+            username: node.username.clone(),
+            auth,
+            known_hosts_path,
+            columns: 80,
+            rows: 24,
+        })
     }
 
     fn start_session(
@@ -107,34 +201,10 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let auth = match node.auth {
-            managi_core::AuthKind::Password => {
-                let Some(password) = password else {
-                    return;
-                };
-                AuthMethod::Password(password)
-            }
-            managi_core::AuthKind::PrivateKey => AuthMethod::PrivateKey {
-                path: PathBuf::from(node.key_path.trim()),
-                passphrase: self.passwords.get(&node.id).cloned(),
-            },
-        };
-
-        let known_hosts_path = self
-            .state
-            .config_path
-            .parent()
-            .map(|parent| parent.join("known_hosts"))
-            .unwrap_or_else(|| PathBuf::from("known_hosts"));
-
-        let request = ConnectRequest {
-            host: node.host.clone(),
-            port: node.port,
-            username: node.username.clone(),
-            auth,
-            known_hosts_path,
-            columns: 80,
-            rows: 24,
+        let Some(request) = self.connect_request(node, password) else {
+            self.state.notice = Some(self.state.strings().key_path_required.to_string());
+            cx.notify();
+            return;
         };
 
         match managi_ssh::session::spawn(request) {
@@ -149,6 +219,32 @@ impl AppView {
             }
         }
         self.term_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn start_sftp(
+        &mut self,
+        tab_id: &str,
+        node: &Node,
+        password: Option<String>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request) = self.connect_request(node, password) else {
+            self.state.notice = Some(self.state.strings().key_path_required.to_string());
+            cx.notify();
+            return;
+        };
+
+        match managi_ssh::sftp::spawn(request) {
+            Ok(handle) => {
+                self.sftp
+                    .insert(tab_id.to_string(), SftpRuntime::new(handle));
+            }
+            Err(error) => {
+                self.state.notice = Some(error.to_string());
+            }
+        }
         cx.notify();
     }
 
@@ -174,7 +270,46 @@ impl AppView {
             self.open_prompt(
                 format!("{} {}", strings.connect_prefix, node.name),
                 None,
-                PromptAction::ConnectNode(node.id.clone()),
+                PromptAction::ConnectNode {
+                    node_id: node.id.clone(),
+                    kind: TabKind::Terminal,
+                },
+                window,
+                cx,
+            );
+        }
+    }
+
+    pub(crate) fn reconnect_sftp_active(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let node = self
+            .state
+            .active_tab()
+            .and_then(|tab| tab.node.clone());
+        let Some(node) = node else {
+            return;
+        };
+        self.sftp.remove(&tab_id);
+
+        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+            self.start_sftp(&tab_id, &node, None, window, cx);
+        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+            self.start_sftp(&tab_id, &node, Some(password), window, cx);
+        } else {
+            let strings = self.state.strings();
+            self.open_prompt(
+                format!("{} {}", strings.connect_prefix, node.name),
+                None,
+                PromptAction::ConnectNode {
+                    node_id: node.id.clone(),
+                    kind: TabKind::Sftp,
+                },
                 window,
                 cx,
             );
@@ -264,12 +399,255 @@ impl AppView {
         }
     }
 
-    fn poll_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_quick(&mut self, cx: &mut Context<Self>) {
+        self.quick_open = !self.quick_open;
+        cx.notify();
+    }
+
+    pub(crate) fn run_quick_command(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+            return;
+        };
+        if !runtime.is_live() {
+            return;
+        }
+        let mut payload = command.as_bytes().to_vec();
+        payload.push(b'\r');
+        runtime.handle.write(payload);
+        self.term_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn sftp_select(&mut self, name: &str, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.sftp.get_mut(&tab_id) else {
+            return;
+        };
+        let Some(entry) = runtime.entries.iter().find(|entry| entry.name == name) else {
+            return;
+        };
+        let is_dir = entry.is_dir;
+        let hit = self.last_sftp_click.as_ref().is_some_and(|(tab, last, at)| {
+            tab == &tab_id && last == name && at.elapsed() < Duration::from_millis(400)
+        });
+        if hit && is_dir {
+            runtime.open_dir(name);
+            self.last_sftp_click = None;
+        } else {
+            runtime.selected = Some(name.to_string());
+            self.last_sftp_click = Some((tab_id, name.to_string(), Instant::now()));
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn sftp_up(&mut self, cx: &mut Context<Self>) {
+        if let Some(runtime) = self.active_sftp_mut() {
+            runtime.up();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn sftp_refresh(&mut self, cx: &mut Context<Self>) {
+        if let Some(runtime) = self.active_sftp_mut() {
+            runtime.refresh();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn sftp_new_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if !self.sftp.contains_key(&tab_id) {
+            return;
+        }
+        let strings = self.state.strings();
+        self.open_prompt(
+            strings.sftp_new_dir.to_string(),
+            None,
+            PromptAction::SftpMkdir(tab_id),
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn sftp_upload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if !self.sftp.contains_key(&tab_id) {
+            return;
+        }
+        let strings = self.state.strings();
+        self.open_prompt(
+            strings.sftp_upload_title.to_string(),
+            None,
+            PromptAction::SftpUpload(tab_id),
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn sftp_download(&mut self, cx: &mut Context<Self>) {
+        let strings = self.state.strings();
+        let selection = self.active_sftp_mut().and_then(|runtime| {
+            let name = runtime.selected.clone()?;
+            let is_file = runtime
+                .entries
+                .iter()
+                .any(|entry| entry.name == name && !entry.is_dir);
+            Some((name, is_file))
+        });
+        let Some((name, is_file)) = selection else {
+            self.state.notice = Some(strings.sftp_no_selection.to_string());
+            cx.notify();
+            return;
+        };
+        if !is_file {
+            self.state.notice = Some(strings.sftp_no_selection.to_string());
+            cx.notify();
+            return;
+        }
+        if let Some(runtime) = self.active_sftp_mut() {
+            runtime.download(&name);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn sftp_delete(&mut self, cx: &mut Context<Self>) {
+        let strings = self.state.strings();
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let selection = self.sftp.get(&tab_id).and_then(|runtime| {
+            let name = runtime.selected.clone()?;
+            runtime
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| (entry.name.clone(), entry.is_dir))
+        });
+        let Some((name, is_dir)) = selection else {
+            self.state.notice = Some(strings.sftp_no_selection.to_string());
+            cx.notify();
+            return;
+        };
+        let message = format!("{} {}?", strings.sftp_delete_confirm, name);
+        self.open_confirm(
+            message,
+            ConfirmAction::SftpDelete {
+                tab_id,
+                name,
+                is_dir,
+            },
+            cx,
+        );
+    }
+
+    fn active_sftp_mut(&mut self) -> Option<&mut SftpRuntime> {
+        let tab_id = self.state.active_tab.clone()?;
+        self.sftp.get_mut(&tab_id)
+    }
+
+    pub(crate) fn open_batch(&mut self, cx: &mut Context<Self>) {
+        self.state.open_singleton(TabKind::Batch);
+        cx.notify();
+    }
+
+    pub(crate) fn run_batch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let strings = self.state.strings();
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let command = self.batch_command.read(cx).value().trim().to_string();
+        if command.is_empty() {
+            self.state.notice = Some(strings.batch_command_placeholder.to_string());
+            cx.notify();
+            return;
+        }
+
+        let selected = self.state.selected_nodes.clone();
+        if selected.is_empty() {
+            self.state.notice = Some(strings.batch_no_selection.to_string());
+            cx.notify();
+            return;
+        }
+
+        let nodes: Vec<Node> = selected
+            .iter()
+            .filter_map(|id| {
+                self.state
+                    .config
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == id)
+                    .cloned()
+            })
+            .collect();
+        if nodes.is_empty() {
+            self.state.notice = Some(strings.batch_no_selection.to_string());
+            cx.notify();
+            return;
+        }
+
+        let mut runtime = BatchRuntime::new(command.clone());
+        for node in nodes {
+            let Some(request) = self.connect_request(&node, None) else {
+                runtime.push_error(
+                    node.name.clone(),
+                    node.id.clone(),
+                    strings.batch_no_password.to_string(),
+                );
+                continue;
+            };
+            match managi_ssh::exec::spawn(request, command.clone()) {
+                Ok(handle) => runtime.push(node.name.clone(), node.id.clone(), Some(handle)),
+                Err(error) => {
+                    runtime.push_error(node.name.clone(), node.id.clone(), error.to_string())
+                }
+            }
+        }
+
+        self.batches.insert(tab_id, runtime);
+        self.batch_command.read(cx).focus_handle(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn batch_stop(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if let Some(runtime) = self.batches.get_mut(&tab_id) {
+            runtime.stop(index);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn batch_stop_all(&mut self, cx: &mut Context<Self>) {
+        if let Some(runtime) = self.active_batch_mut() {
+            runtime.stop_all();
+            cx.notify();
+        }
+    }
+
+    fn active_batch_mut(&mut self) -> Option<&mut BatchRuntime> {
+        let tab_id = self.state.active_tab.clone()?;
+        self.batches.get_mut(&tab_id)
+    }
+
+    fn poll_sessions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let active_tab = self.state.active_tab.clone();
-        let active_is_terminal = self
-            .state
-            .active_tab()
-            .is_some_and(|tab| tab.kind == TabKind::Terminal);
+        let active_kind = self.state.active_tab().map(|tab| tab.kind);
 
         let valid_tabs: Vec<String> = self
             .state
@@ -279,10 +657,10 @@ impl AppView {
             .collect();
         self.terminals
             .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
-
-        if self.terminals.is_empty() {
-            return;
-        }
+        self.sftp
+            .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
+        self.batches
+            .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
 
         let font_size = f32::from(self.state.config.settings.terminal_font_size);
         let width = window.bounds().size.width.as_f32()
@@ -292,27 +670,53 @@ impl AppView {
         let columns = ((width / (font_size * 0.62)).floor() as u16).max(20);
         let rows = ((height / (font_size * 1.28)).floor() as u16).max(4);
 
-        let mut any_live = false;
+        let mut animate = false;
         for (tab_id, runtime) in &mut self.terminals {
             let changed = runtime.poll();
-            if active_is_terminal && active_tab.as_deref() == Some(tab_id.as_str()) {
+            if active_kind == Some(TabKind::Terminal) && active_tab.as_deref() == Some(tab_id.as_str()) {
                 runtime.resize(columns, rows);
             }
             if runtime.is_live() {
-                any_live = true;
+                animate = true;
             }
-            if changed && active_is_terminal && active_tab.as_deref() == Some(tab_id.as_str()) {
+            if changed
+                && active_kind == Some(TabKind::Terminal)
+                && active_tab.as_deref() == Some(tab_id.as_str())
+            {
                 cx.notify();
             }
         }
-        // 会话不断产生输出；仍有活动会话时持续请求下一帧。
-        if any_live {
+
+        for (tab_id, runtime) in &mut self.sftp {
+            let changed = runtime.poll();
+            if runtime.is_live() {
+                animate = true;
+            }
+            if changed && active_kind == Some(TabKind::Sftp) && active_tab.as_deref() == Some(tab_id.as_str()) {
+                cx.notify();
+            }
+        }
+
+        for (tab_id, runtime) in &mut self.batches {
+            let changed = runtime.poll();
+            if runtime.running() {
+                animate = true;
+            }
+            if changed && active_kind == Some(TabKind::Batch) && active_tab.as_deref() == Some(tab_id.as_str()) {
+                cx.notify();
+            }
+        }
+
+        // 仍有活动会话/传输/批量任务时持续请求下一帧。
+        if animate {
             window.request_animation_frame();
         }
     }
 
     pub(crate) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.terminals.remove(id);
+        self.sftp.remove(id);
+        self.batches.remove(id);
         self.state.close_tab(id);
         cx.notify();
     }
@@ -347,8 +751,16 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let masked = matches!(&action, PromptAction::ConnectNode(_));
-        let prompt = PromptModal::create(title, initial, action, masked, window, cx);
+        let masked = matches!(&action, PromptAction::ConnectNode { .. });
+        let strings = self.state.strings();
+        let placeholder = match &action {
+            PromptAction::ConnectNode { .. } => strings.password_placeholder,
+            PromptAction::SftpUpload(_) => strings.sftp_upload_placeholder,
+            PromptAction::SftpMkdir(_) => strings.sftp_dir_placeholder,
+            PromptAction::NewGroup => strings.new_group_placeholder,
+            PromptAction::RenameGroup(_) => strings.rename_group_placeholder,
+        };
+        let prompt = PromptModal::create(title, initial, action, placeholder, masked, window, cx);
         let handle = prompt.input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         self.modal = Some(Modal::Prompt(prompt));
@@ -464,7 +876,7 @@ impl AppView {
 
         if value.is_empty() {
             let message = match &action {
-                PromptAction::ConnectNode(_) => strings.password_required,
+                PromptAction::ConnectNode { .. } => strings.password_required,
                 _ => strings.name_required,
             };
             self.set_modal_error(message.to_string());
@@ -473,7 +885,7 @@ impl AppView {
         }
 
         match action {
-            PromptAction::ConnectNode(node_id) => {
+            PromptAction::ConnectNode { node_id, kind } => {
                 self.passwords.insert(node_id.clone(), value);
                 let node = self
                     .state
@@ -487,7 +899,34 @@ impl AppView {
                     let Some(tab_id) = self.state.active_tab.clone() else {
                         return;
                     };
-                    self.start_session(&tab_id, &node, self.passwords.get(&node_id).cloned(), window, cx);
+                    let password = self.passwords.get(&node_id).cloned();
+                    if kind == TabKind::Sftp {
+                        self.start_sftp(&tab_id, &node, password, window, cx);
+                    } else {
+                        self.start_session(&tab_id, &node, password, window, cx);
+                    }
+                }
+                cx.notify();
+                return;
+            }
+            PromptAction::SftpMkdir(tab_id) => {
+                self.modal = None;
+                if let Some(runtime) = self.sftp.get_mut(&tab_id) {
+                    runtime.mkdir(&value);
+                }
+                cx.notify();
+                return;
+            }
+            PromptAction::SftpUpload(tab_id) => {
+                let path = PathBuf::from(value);
+                if !path.is_file() {
+                    self.set_modal_error(strings.sftp_local_required.to_string());
+                    cx.notify();
+                    return;
+                }
+                self.modal = None;
+                if let Some(runtime) = self.sftp.get_mut(&tab_id) {
+                    runtime.upload(path);
                 }
                 cx.notify();
                 return;
@@ -556,6 +995,20 @@ impl AppView {
                         node.group.clear();
                     }
                 }
+            }
+            ConfirmAction::SftpDelete {
+                tab_id,
+                name,
+                is_dir,
+            } => {
+                self.modal = None;
+                if let Some(runtime) = self.sftp.get_mut(&tab_id) {
+                    let path = join_path(&runtime.path, &name);
+                    runtime.handle.send(managi_ssh::SftpCommand::Delete { path, is_dir });
+                    runtime.selected = None;
+                }
+                cx.notify();
+                return;
             }
         }
 
@@ -641,11 +1094,17 @@ impl AppView {
                 let keep_id = keep.map(|tab| tab.id.clone());
                 self.terminals
                     .retain(|tab_id, _| keep_id.as_deref() == Some(tab_id.as_str()));
+                self.sftp
+                    .retain(|tab_id, _| keep_id.as_deref() == Some(tab_id.as_str()));
+                self.batches
+                    .retain(|tab_id, _| keep_id.as_deref() == Some(tab_id.as_str()));
                 self.state.close_others(&id);
                 cx.notify();
             }
             MenuAction::CloseAll => {
                 self.terminals.clear();
+                self.sftp.clear();
+                self.batches.clear();
                 self.state.close_all();
                 cx.notify();
             }
@@ -755,7 +1214,7 @@ impl AppView {
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.poll_terminals(window, cx);
+        self.poll_sessions(window, cx);
         let palette = theme::palette(self.state.config.settings.theme);
         let strings = self.state.strings();
 
@@ -766,7 +1225,12 @@ impl Render for AppView {
             &strings,
             palette,
             &self.terminals,
+            &self.sftp,
+            &self.batches,
+            &self.batch_command,
             &self.term_focus,
+            self.quick_open,
+            window,
             cx,
         );
 
@@ -1183,7 +1647,7 @@ fn secondary_button(label: &'static str, palette: Palette) -> Stateful<Div> {
         .child(label.to_string())
 }
 
-fn primary_button(label: &'static str, palette: Palette) -> Stateful<Div> {
+pub(crate) fn primary_button(label: &'static str, palette: Palette) -> Stateful<Div> {
     div()
         .id(label)
         .h(px(30.0))
