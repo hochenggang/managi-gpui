@@ -60,6 +60,7 @@ pub(crate) fn render(
                 )
                 .child(
                     div()
+                        .id("sidebar-add-node")
                         .w(px(28.0))
                         .h(px(28.0))
                         .flex_shrink_0()
@@ -83,7 +84,7 @@ fn group_block(
     group: &crate::state::DisplayGroup,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> Div {
+) -> impl IntoElement {
     let key = if group.all_hosts {
         String::new()
     } else {
@@ -97,8 +98,11 @@ fn group_block(
     let ids_for_click = node_ids.clone();
     let menu_key = key.clone();
     let chevron_key = group.label.clone();
+    let header_id = format!("sidebar-group-{}", group.label);
+    let chevron_id = format!("sidebar-group-chevron-{}", group.label);
 
     let header = div()
+        .id(header_id)
         .flex()
         .items_center()
         .py(px(7.2))
@@ -133,6 +137,7 @@ fn group_block(
         )
         .child(
             div()
+                .id(chevron_id)
                 .w(px(16.0))
                 .h(px(16.0))
                 .flex()
@@ -189,16 +194,19 @@ fn node_row(
     node: &managi_core::Node,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> Div {
+) -> impl IntoElement {
     let node_id = node.id.clone();
     let selected = state.is_selected(&node_id);
     let group_name = SharedString::from(format!("node-row-{}", node.id));
+    let term_id = format!("node-term-{}", node.id);
+    let sftp_id = format!("node-folder-{}", node.id);
 
     let terminal_node = node.clone();
     let sftp_node = node.clone();
     let menu_node = node.id.clone();
 
     let row = div()
+        .id(format!("node-row-{}", node.id))
         .relative()
         .w_full()
         .flex()
@@ -265,6 +273,7 @@ fn node_row(
                 .group_hover(group_name, |style| style.visible())
                 .child(
                     div()
+                        .id(term_id)
                         .w(px(18.0))
                         .h(px(18.0))
                         .flex()
@@ -281,6 +290,7 @@ fn node_row(
                 )
                 .child(
                     div()
+                        .id(sftp_id)
                         .w(px(18.0))
                         .h(px(18.0))
                         .flex()
@@ -300,7 +310,7 @@ fn node_row(
     row
 }
 
-fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> Div {
+fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> impl IntoElement {
     let collapsed = state.sidebar_collapsed;
     let chevron = if collapsed {
         icons::CHEVRON_RIGHT
@@ -319,6 +329,7 @@ fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> Div 
         .border_color(palette.border)
         .child(
             div()
+                .id("sidebar-collapse")
                 .w(px(28.0))
                 .h(px(28.0))
                 .flex()
@@ -334,6 +345,7 @@ fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> Div 
         )
         .child(
             div()
+                .id("sidebar-settings")
                 .w(px(28.0))
                 .h(px(28.0))
                 .flex()

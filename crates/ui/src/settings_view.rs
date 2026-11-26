@@ -29,15 +29,19 @@ pub(crate) fn render(
         .border_r_1()
         .border_color(palette.border);
 
-    for (section, label) in [
+    for (index, (section, label)) in [
         (SettingsSection::Appearance, strings.appearance),
         (SettingsSection::Terminal, strings.terminal),
         (SettingsSection::Data, strings.data),
         (SettingsSection::About, strings.about),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let active = state.settings_section == section;
         nav = nav.child(
             div()
+                .id(ElementId::named_usize("settings-nav", index))
                 .h(px(36.0))
                 .px(px(12.0))
                 .flex()
@@ -120,16 +124,20 @@ fn appearance_section(
     cx: &mut Context<AppView>,
 ) -> Div {
     let mut cards = div().flex().gap(px(12.0)).mb(px(16.0));
-    for theme_name in [
+    for (index, theme_name) in [
         ThemeName::Nord,
         ThemeName::NordLight,
         ThemeName::GithubDark,
         ThemeName::GithubLight,
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let selected = state.config.settings.theme == theme_name;
         let preview = theme::palette(theme_name).bg;
         cards = cards.child(
             div()
+                .id(ElementId::named_usize("settings-theme", index))
                 .w(px(84.0))
                 .p(px(8.0))
                 .flex()
@@ -183,6 +191,7 @@ fn appearance_section(
         let selected = state.config.settings.language == lang;
         language_row = language_row.child(
             div()
+                .id(format!("settings-language-{label}"))
                 .h(px(28.0))
                 .px(px(12.0))
                 .flex()
@@ -240,7 +249,7 @@ fn terminal_section(
         .flex()
         .items_center()
         .gap(px(6.0))
-        .child(step_button("-", palette).on_click(cx.listener(|this, _, _, cx| {
+        .child(step_button("-", palette).id("settings-font-minus").on_click(cx.listener(|this, _, _, cx| {
             let next = this
                 .state
                 .config
@@ -269,7 +278,7 @@ fn terminal_section(
                 .text_color(palette.font_1)
                 .child(size.to_string()),
         )
-        .child(step_button("+", palette).on_click(cx.listener(|this, _, _, cx| {
+        .child(step_button("+", palette).id("settings-font-plus").on_click(cx.listener(|this, _, _, cx| {
             let next = this
                 .state
                 .config
@@ -301,6 +310,7 @@ fn terminal_section(
         let selected = state.config.settings.terminal_font_family == family;
         families = families.child(
             div()
+                .id(format!("settings-family-{family}"))
                 .h(px(28.0))
                 .px(px(12.0))
                 .flex()

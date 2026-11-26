@@ -42,8 +42,11 @@ pub(crate) fn render(
 
         let fg = if active { palette.font_1 } else { palette.font_3 };
 
+        let close_elem_id = format!("tab-close-{}", tab.id);
+
         strip = strip.child(
             div()
+                .id(format!("tab-{}", tab.id))
                 .relative()
                 .h(px(BAR_HEIGHT - 2.0))
                 .mt(px(2.0))
@@ -92,6 +95,7 @@ pub(crate) fn render(
                 )
                 .child(
                     div()
+                        .id(close_elem_id)
                         .w(px(16.0))
                         .h(px(16.0))
                         .flex_shrink_0()
@@ -125,6 +129,7 @@ pub(crate) fn render(
 
     strip = strip.child(
         div()
+            .id("tab-add")
             .w(px(28.0))
             .h(px(28.0))
             .ml(px(4.0))

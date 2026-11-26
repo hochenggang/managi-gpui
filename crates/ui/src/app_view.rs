@@ -727,7 +727,7 @@ fn menu_layer(menu: &MenuState, palette: Palette, cx: &mut Context<AppView>) -> 
         .border_1()
         .border_color(palette.border);
 
-    for item in &menu.items {
+    for (index, item) in menu.items.iter().enumerate() {
         let action = item.action.clone();
         let color = if item.danger {
             palette.red
@@ -736,6 +736,7 @@ fn menu_layer(menu: &MenuState, palette: Palette, cx: &mut Context<AppView>) -> 
         };
         panel = panel.child(
             div()
+                .id(ElementId::named_usize("menu-item", index))
                 .h(px(32.0))
                 .px(px(12.0))
                 .flex()
@@ -788,8 +789,9 @@ fn field(label: &'static str, input: impl IntoElement, palette: Palette) -> Div 
         .child(input)
 }
 
-fn secondary_button(label: &'static str, palette: Palette) -> Div {
+fn secondary_button(label: &'static str, palette: Palette) -> impl IntoElement {
     div()
+        .id(label)
         .h(px(30.0))
         .px(px(14.0))
         .flex()
@@ -808,8 +810,9 @@ fn secondary_button(label: &'static str, palette: Palette) -> Div {
         .child(label.to_string())
 }
 
-fn primary_button(label: &'static str, palette: Palette) -> Div {
+fn primary_button(label: &'static str, palette: Palette) -> impl IntoElement {
     div()
+        .id(label)
         .h(px(30.0))
         .px(px(14.0))
         .flex()
