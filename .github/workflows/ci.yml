@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2022
+            artifact: managi-gpui-windows-x64
+            binary: target/release/managi-gpui.exe
+          - name: linux-x64
+            os: ubuntu-24.04
+            artifact: managi-gpui-linux-x64
+            binary: target/release/managi-gpui
+          - name: macos-arm64
+            os: macos-15
+            artifact: managi-gpui-macos-arm64
+            binary: target/release/managi-gpui
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Linux 依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ clang cmake pkg-config \
+            libfontconfig-dev libfreetype-dev \
+            libwayland-dev wayland-protocols libxkbcommon-x11-dev \
+            libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libssl-dev libzstd-dev libasound2-dev \
+            libvulkan-dev libvulkan1 vulkan-validationlayers \
+            libwebkit2gtk-4.1-dev
+
+      - name: Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: macOS Metal 工具链
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: 构建（release）
+        run: cargo build --release --bins
+
+      - name: 单元测试（纯逻辑 crate）
+        run: cargo test -p managi-core -p managi-term -p managi-ssh
+
+      - name: 无窗口自检
+        run: cargo run --release -p managi-app --bin managi-gpui-selftest
+
+      - name: 上传可执行产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 上传 Cargo.lock（供提交锁定版本）
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cargo.lock
+          path: Cargo.lock
+          retention-days: 30

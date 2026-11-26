@@ -1,0 +1,12 @@
+[package]
+name = "managi-ssh"
+description = "SSH 会话与主机信任（russh）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+russh = { workspace = true }
+thiserror = { workspace = true }

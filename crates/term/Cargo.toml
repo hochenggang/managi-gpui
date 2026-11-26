@@ -1,0 +1,11 @@
+[package]
+name = "managi-term"
+description = "终端网格与按键编码（不依赖 gpui）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alacritty_terminal = { workspace = true }

@@ -1,0 +1,25 @@
+[package]
+name = "managi-app"
+description = "managi-gpui 可执行程序"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "managi-gpui"
+path = "src/main.rs"
+
+[[bin]]
+name = "managi-gpui-selftest"
+path = "src/bin/selftest.rs"
+
+[dependencies]
+gpui-kit = { workspace = true }
+managi-core = { path = "../core" }
+managi-ssh = { path = "../ssh" }
+managi-term = { path = "../term" }
+managi-ui = { path = "../ui" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
