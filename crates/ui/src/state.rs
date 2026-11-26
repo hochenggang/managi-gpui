@@ -250,15 +250,16 @@ impl AppState {
         };
 
         let mut groups = Vec::with_capacity(self.config.groups.len() + 1);
+        let all_host_matches: Vec<Node> = all_nodes
+            .iter()
+            .filter(|node| matches(node))
+            .map(|node| (**node).clone())
+            .collect();
         groups.push(DisplayGroup {
             label: strings.all_hosts.to_string(),
             all_hosts: true,
-            count: all_nodes.len(),
-            nodes: all_nodes
-                .iter()
-                .filter(|node| matches(node))
-                .map(|node| (**node).clone())
-                .collect(),
+            count: all_host_matches.len(),
+            nodes: all_host_matches,
         });
 
         for group in &self.config.groups {
@@ -268,7 +269,6 @@ impl AppState {
                 .filter(|node| node.group.as_str() == group.as_str())
                 .collect();
             nodes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-            let total = nodes.len();
             let filtered: Vec<Node> = nodes
                 .into_iter()
                 .filter(|node| matches(node))
@@ -285,7 +285,7 @@ impl AppState {
             groups.push(DisplayGroup {
                 label: group.clone(),
                 all_hosts: false,
-                count: total,
+                count: filtered.len(),
                 nodes: filtered,
             });
         }

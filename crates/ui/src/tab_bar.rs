@@ -96,8 +96,8 @@ pub(crate) fn render(
                 .child(
                     div()
                         .id(close_elem_id)
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(px(20.0))
+                        .h(px(20.0))
                         .flex_shrink_0()
                         .flex()
                         .items_center()

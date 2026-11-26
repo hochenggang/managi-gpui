@@ -138,7 +138,7 @@ fn appearance_section(
         cards = cards.child(
             div()
                 .id(ElementId::named_usize("settings-theme", index))
-                .w(px(84.0))
+                .w(px(104.0))
                 .p(px(8.0))
                 .flex()
                 .flex_col()

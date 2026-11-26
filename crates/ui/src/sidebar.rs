@@ -29,8 +29,23 @@ pub(crate) fn render(
         .scrollbar_width(px(0.0))
         .p(px(8.0));
 
-    for group in groups {
-        list = list.child(group_block(state, &group, palette, cx));
+    for group in &groups {
+        list = list.child(group_block(state, group, palette, cx));
+    }
+
+    if !state.query.trim().is_empty()
+        && groups.iter().all(|group| group.nodes.is_empty())
+    {
+        list = list.child(
+            div()
+                .w_full()
+                .pt(px(16.0))
+                .flex()
+                .justify_center()
+                .text_size(px(11.2))
+                .text_color(palette.font_3)
+                .child(strings.no_matches.to_string()),
+        );
     }
 
     div()

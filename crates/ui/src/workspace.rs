@@ -6,9 +6,11 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app_view::{AppView, BAR_HEIGHT};
+use crate::assets::icons;
 use crate::i18n::Strings;
 use crate::state::{AppState, TabKind};
 use crate::theme::{self, Palette};
+use crate::widgets::icon;
 
 pub(crate) fn render(
     state: &AppState,
@@ -38,11 +40,25 @@ fn empty_state(strings: &Strings, palette: Palette) -> Div {
     div()
         .flex_1()
         .flex()
+        .flex_col()
         .items_center()
         .justify_center()
-        .text_size(px(11.2))
-        .text_color(palette.font_3)
-        .child(strings.no_tabs.to_string())
+        .gap(px(10.0))
+        .bg(palette.bg)
+        .child(icon(icons::TERMINAL, 40.0, palette.font_3))
+        .child(
+            div()
+                .text_size(px(20.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(palette.font_1)
+                .child("Managi"),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(palette.font_3)
+                .child(strings.empty_hint.to_string()),
+        )
 }
 
 fn notice_panel(message: &'static str, palette: Palette) -> Div {
