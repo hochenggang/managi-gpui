@@ -121,7 +121,7 @@ async fn run(
     events: mpsc::Sender<SftpEvent>,
 ) -> Result<(), String> {
     let mut session = connect_and_authenticate(&request).await?;
-    let channel = session
+    let mut channel = session
         .channel_open_session()
         .await
         .map_err(|error| format!("打开 SFTP 通道失败: {error}"))?;
@@ -138,7 +138,7 @@ async fn run(
     let home = sftp
         .canonicalize(".")
         .await
-        .map(|path| path.to_string_lossy().into_owned())
+        .map(|path| path)
         .unwrap_or_else(|_| "/".to_string());
     let _ = events.send(SftpEvent::Ready { home });
 
@@ -258,7 +258,7 @@ async fn list_dir(sftp: &SftpSession, path: &str) -> Result<Vec<SftpEntry>, Stri
     for entry in read_dir {
         let metadata = entry.metadata();
         items.push(SftpEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
+            name: entry.file_name(),
             is_dir: entry.file_type().is_dir(),
             size: metadata.size.unwrap_or(0),
             modified: metadata.mtime.unwrap_or(0),
