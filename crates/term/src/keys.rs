@@ -15,6 +15,8 @@ pub fn encode_key(
 ) -> Option<Vec<u8>> {
     let mut bytes = match key {
         "enter" => b"\r".to_vec(),
+        "space" if ctrl => vec![0x00],
+        "space" => b" ".to_vec(),
         "tab" if shift => b"\x1b[Z".to_vec(),
         "tab" => b"\t".to_vec(),
         "backspace" => b"\x7f".to_vec(),
@@ -45,8 +47,23 @@ pub fn encode_key(
             if ctrl {
                 control_byte(other)?
             } else {
-                let text = key_char.filter(|text| !text.is_empty())?;
-                text.as_bytes().to_vec()
+                let text: String = match key_char.filter(|text| !text.is_empty()) {
+                    Some(text) => text.to_string(),
+                    None => {
+                        let mut chars = other.chars();
+                        match (chars.next(), chars.next()) {
+                            (Some(c), None) => {
+                                if shift {
+                                    c.to_uppercase().to_string()
+                                } else {
+                                    c.to_string()
+                                }
+                            }
+                            _ => return None,
+                        }
+                    }
+                };
+                text.into_bytes()
             }
         }
     };
@@ -149,6 +166,22 @@ mod tests {
         assert_eq!(
             encode_key("中", Some("中"), false, false, false, NORMAL),
             Some("中".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn falls_back_to_key_when_key_char_is_missing() {
+        assert_eq!(
+            encode_key("a", None, false, false, false, NORMAL),
+            Some(b"a".to_vec())
+        );
+        assert_eq!(
+            encode_key("a", None, false, false, true, NORMAL),
+            Some(b"A".to_vec())
+        );
+        assert_eq!(
+            encode_key("space", None, false, false, false, NORMAL),
+            Some(b" ".to_vec())
         );
     }
 }

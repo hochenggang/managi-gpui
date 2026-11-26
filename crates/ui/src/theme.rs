@@ -227,8 +227,19 @@ pub(crate) fn mono_font() -> Font {
     } else {
         "DejaVu Sans Mono"
     };
+    let cjk = if cfg!(target_os = "windows") {
+        "Microsoft YaHei UI"
+    } else if cfg!(target_os = "macos") {
+        "PingFang SC"
+    } else {
+        "Noto Sans CJK SC"
+    };
 
-    font(family)
+    Font {
+        family: family.into(),
+        fallbacks: Some(FontFallbacks::from_fonts(vec![cjk.to_string()])),
+        ..Font::default()
+    }
 }
 
 pub(crate) fn theme_label(theme: ThemeName, _strings: Strings) -> &'static str {
