@@ -1,6 +1,7 @@
 //! 两个高频小组件：自绘直角输入框外壳、可着色 SVG 图标。
 
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::theme::Palette;
@@ -21,7 +22,7 @@ pub(crate) fn text_input(
     font_size: f32,
     window: &Window,
     cx: &App,
-) -> impl IntoElement {
+) -> Div {
     let focused = state.read(cx).focus_handle(cx).is_focused(window);
     let border = if focused {
         palette.accent

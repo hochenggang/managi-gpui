@@ -2,6 +2,7 @@
 //!
 //! M1 只画外壳；真正的 SSH/PTY 在 M2 接入，因此终端页明确标注当前状态。
 
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app_view::{AppView, BAR_HEIGHT};
@@ -14,7 +15,7 @@ pub(crate) fn render(
     strings: &Strings,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> impl IntoElement {
+) -> Div {
     let body = match state.active_tab() {
         None => empty_state(strings, palette),
         Some(tab) => match tab.kind {

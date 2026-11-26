@@ -1,5 +1,6 @@
 //! 标签栏：终端 / 文件管理 / 批量 / 设置四类标签，激活态用 2px accent 下划线。
 
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app_view::{AppView, BAR_HEIGHT};
@@ -14,7 +15,7 @@ pub(crate) fn render(
     strings: &Strings,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> impl IntoElement {
+) -> Div {
     let mut strip = div()
         .id("tab-strip")
         .flex_1()

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 use managi_core::{Config, Node};
 

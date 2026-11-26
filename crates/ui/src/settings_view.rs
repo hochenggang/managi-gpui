@@ -1,5 +1,6 @@
 //! 设置页：左侧 192px 导航，右侧内容。外观/终端可选，数据与关于为静态说明。
 
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 use managi_core::settings::{MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE};
 use managi_core::{ThemeName};

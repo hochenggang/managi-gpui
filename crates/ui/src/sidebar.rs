@@ -1,6 +1,7 @@
 //! 侧栏：搜索、分组树、节点行动作、折叠与设置入口。
 
 use gpui_kit::component::input::InputState;
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app_view::{sidebar_width, AppView};
@@ -17,7 +18,7 @@ pub(crate) fn render(
     palette: Palette,
     window: &Window,
     cx: &mut Context<AppView>,
-) -> impl IntoElement {
+) -> Div {
     let width = sidebar_width(state.sidebar_collapsed);
     let groups = state.display_groups(strings);
 
@@ -82,7 +83,7 @@ fn group_block(
     group: &crate::state::DisplayGroup,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> impl IntoElement {
+) -> Div {
     let key = if group.all_hosts {
         String::new()
     } else {
@@ -188,7 +189,7 @@ fn node_row(
     node: &managi_core::Node,
     palette: Palette,
     cx: &mut Context<AppView>,
-) -> impl IntoElement {
+) -> Div {
     let node_id = node.id.clone();
     let selected = state.is_selected(&node_id);
     let group_name = SharedString::from(format!("node-row-{}", node.id));
@@ -299,7 +300,7 @@ fn node_row(
     row
 }
 
-fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> impl IntoElement {
+fn footer(state: &AppState, palette: Palette, cx: &mut Context<AppView>) -> Div {
     let collapsed = state.sidebar_collapsed;
     let chevron = if collapsed {
         icons::CHEVRON_RIGHT

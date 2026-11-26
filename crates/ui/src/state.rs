@@ -265,7 +265,7 @@ impl AppState {
             let mut nodes: Vec<&Node> = all_nodes
                 .iter()
                 .copied()
-                .filter(|node| node.group == group)
+                .filter(|node| node.group.as_str() == group.as_str())
                 .collect();
             nodes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
             let total = nodes.len();
