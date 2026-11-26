@@ -124,7 +124,7 @@ fn group_block(
         }))
         .on_mouse_down(
             MouseButton::Right,
-            cx.listener(move |this, event, window, cx| {
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                 let items = this.group_menu(&menu_key);
                 this.open_menu(
                     event.position.x.as_f32(),
@@ -227,7 +227,7 @@ fn node_row(
         }))
         .on_mouse_down(
             MouseButton::Right,
-            cx.listener(move |this, event, window, cx| {
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                 let items = this.node_menu(&menu_node);
                 this.open_menu(
                     event.position.x.as_f32(),

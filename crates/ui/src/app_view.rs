@@ -789,7 +789,7 @@ fn field(label: &'static str, input: impl IntoElement, palette: Palette) -> Div 
         .child(input)
 }
 
-fn secondary_button(label: &'static str, palette: Palette) -> impl IntoElement {
+fn secondary_button(label: &'static str, palette: Palette) -> Stateful<Div> {
     div()
         .id(label)
         .h(px(30.0))
@@ -810,7 +810,7 @@ fn secondary_button(label: &'static str, palette: Palette) -> impl IntoElement {
         .child(label.to_string())
 }
 
-fn primary_button(label: &'static str, palette: Palette) -> impl IntoElement {
+fn primary_button(label: &'static str, palette: Palette) -> Stateful<Div> {
     div()
         .id(label)
         .h(px(30.0))

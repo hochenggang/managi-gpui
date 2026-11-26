@@ -74,7 +74,7 @@ pub(crate) fn render(
                 }))
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(move |this, event, window, cx| {
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                         let items = this.tab_menu(&menu_id);
                         this.open_menu(
                             event.position.x.as_f32(),
