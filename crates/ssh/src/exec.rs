@@ -95,7 +95,7 @@ async fn run(
     events: mpsc::Sender<ExecEvent>,
 ) -> Result<(), String> {
     let mut session = connect_and_authenticate(&request).await?;
-    let channel = session
+    let mut channel = session
         .channel_open_session()
         .await
         .map_err(|error| format!("打开会话失败: {error}"))?;
