@@ -5,6 +5,7 @@
 use std::error::Error;
 
 use gpui_kit::*;
+use managi_core::{AppPaths, Config};
 use managi_ui::AppView;
 
 pub mod logging;
@@ -38,24 +39,33 @@ where
 fn run_gui() -> Result<(), Box<dyn Error>> {
     logging::init();
 
-    gpui_kit::application().run(|cx| {
-        gpui_kit::init(cx);
-        gpui_kit::open_window(window_options(), cx, |_window, cx| {
-            cx.new(|_| AppView::new(env!("CARGO_PKG_VERSION")))
-        })
-        .expect("打开主窗口失败");
-    });
+    let paths = AppPaths::discover()?;
+    paths.ensure()?;
+    let config = Config::load(paths.config_file())?;
+    let config_path = paths.config_file();
+    let version = env!("CARGO_PKG_VERSION").to_string();
+
+    gpui_kit::application()
+        .with_assets(managi_ui::Assets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(window_options(), cx, move |window, cx| {
+                cx.new(|cx| AppView::new(config, config_path, version, window, cx))
+            })
+            .expect("打开主窗口失败");
+        });
 
     Ok(())
 }
 
-/// 窗口尺寸与标题；DESIGN.md §4 规定默认 1280×800。
+/// 窗口尺寸与标题；DESIGN.md §4 规定默认 1280×800、最小 960×600。
 fn window_options() -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(
             point(px(100.0), px(80.0)),
             size(px(1280.0), px(800.0)),
         ))),
+        window_min_size: Some(size(px(960.0), px(600.0))),
         titlebar: Some(TitlebarOptions {
             title: Some("managi-gpui".into()),
             ..Default::default()
