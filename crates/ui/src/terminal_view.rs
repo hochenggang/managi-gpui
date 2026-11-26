@@ -188,7 +188,7 @@ pub(crate) fn render(
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                 this.term_focus.focus(window, cx);
             }))
-            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
+            .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
                 let lines = match event.delta {
                     ScrollDelta::Lines(delta) => delta.y.round() as i32,
                     ScrollDelta::Pixels(delta) => (delta.y.as_f32() / line_height).round() as i32,
