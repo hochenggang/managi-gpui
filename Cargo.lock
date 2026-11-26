@@ -4440,6 +4440,8 @@ version = "0.1.0"
 dependencies = [
  "gpui-kit",
  "managi-core",
+ "managi-ssh",
+ "managi-term",
 ]
 
 [[package]]
