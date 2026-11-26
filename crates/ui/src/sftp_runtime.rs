@@ -39,7 +39,6 @@ impl SftpRuntime {
                     self.home = home.clone();
                     self.path = home;
                     self.loading = true;
-                    self.requested = true;
                     self.handle.send(SftpCommand::List(self.path.clone()));
                 }
                 SftpEvent::Entries { path, items } => {

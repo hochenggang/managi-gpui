@@ -105,15 +105,15 @@ pub(crate) fn render(
         .into_any_element(),
     );
 
-    let selected_is_file = runtime
-        .and_then(|runtime| runtime.selected.as_deref())
-        .and_then(|name| {
-            runtime
-                .entries
-                .iter()
-                .find(|entry| entry.name == name && !entry.is_dir)
-        })
-        .is_some();
+    let selected_is_file = runtime.is_some_and(|runtime| {
+        let Some(name) = runtime.selected.as_deref() else {
+            return false;
+        };
+        runtime
+            .entries
+            .iter()
+            .any(|entry| entry.name == name && !entry.is_dir)
+    });
     toolbar = toolbar.child(
         tool_button(
             "sftp-download",
