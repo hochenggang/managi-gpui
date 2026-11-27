@@ -61,7 +61,9 @@ pub(crate) fn render(
         .bg(palette.terminal_bg)
         .p(px(8.0))
         .font(theme::mono_font())
-        .text_size(px(font_size));
+        .text_size(px(font_size))
+        .track_focus(focus)
+        .id("terminal-screen");
 
     if let Some(runtime) = runtime {
         let snapshot = runtime.model.snapshot();
@@ -258,7 +260,6 @@ pub(crate) fn render(
 
     let body = if runtime.is_some() {
         screen
-            .track_focus(focus)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
