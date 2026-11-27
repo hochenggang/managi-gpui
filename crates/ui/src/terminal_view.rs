@@ -335,6 +335,57 @@ pub(crate) fn render(
                     this.handle_terminal_key(event, window, cx);
                 },
             ))
+            .child(
+                // 文本行自身会带一层单元格文本元素，鼠标事件容易落到它们上面；
+                // 这里再铺一层透明的交互层，保证点击聚焦、拖选始终命中。
+                div()
+                    .absolute()
+                    .left(px(0.0))
+                    .top(px(0.0))
+                    .w_full()
+                    .h_full()
+                    .id("terminal-pointer")
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            let (line, column, _) = cell_at(
+                                event.position,
+                                content_x,
+                                content_y,
+                                cell_width,
+                                line_height,
+                                screen_columns,
+                                screen_lines,
+                            );
+                            this.terminal_mouse_down(
+                                line,
+                                column,
+                                event.click_count,
+                                event.modifiers.control,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(
+                        move |this, event: &MouseMoveEvent, _, cx| {
+                            if event.pressed_button != Some(MouseButton::Left) {
+                                return;
+                            }
+                            let (line, column, tail) = cell_at(
+                                event.position,
+                                content_x,
+                                content_y,
+                                cell_width,
+                                line_height,
+                                screen_columns,
+                                screen_lines,
+                            );
+                            this.terminal_mouse_move(line, column, tail, cx);
+                        },
+                    )),
+            )
     } else {
         screen
     };
