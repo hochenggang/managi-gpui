@@ -25,7 +25,10 @@ pub(crate) fn render(
     batches: &HashMap<String, BatchRuntime>,
     batch_command: &Entity<InputState>,
     focus: &FocusHandle,
+    term_search: &Entity<InputState>,
+    terminal_search_open: bool,
     quick_open: bool,
+    sidebar_width: f32,
     window: &Window,
     cx: &mut Context<AppView>,
 ) -> Div {
@@ -40,7 +43,11 @@ pub(crate) fn render(
                 f32::from(state.config.settings.terminal_font_size),
                 state.config.settings.language,
                 quick_open,
+                sidebar_width,
+                term_search,
+                terminal_search_open,
                 focus,
+                window,
                 cx,
             ),
             TabKind::Sftp => crate::sftp_view::render(

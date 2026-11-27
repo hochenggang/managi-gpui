@@ -18,6 +18,12 @@ pub(crate) enum MenuAction {
     CloseTab(String),
     CloseOthers(String),
     CloseAll,
+    CopySelection,
+    PasteClipboard,
+    SelectAll,
+    SearchTerminal,
+    ClearScreen,
+    OpenLink(usize, usize),
 }
 
 pub(crate) struct MenuState {

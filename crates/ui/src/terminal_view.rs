@@ -1,14 +1,16 @@
 //! 终端网格绘制：alacritty 快照 → GPUI 行/颜色段 + 光标 + 底栏。
 
+use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use managi_core::Node;
-use managi_term::{SnapshotColor, SnapshotRow, SnapshotRun};
+use managi_term::{SnapshotColor, SnapshotRow, SnapshotRun, SnapshotSpan};
 
 use crate::app_view::{AppView, BAR_HEIGHT};
 use crate::i18n::Strings;
 use crate::terminal_runtime::{TerminalRuntime, TerminalStatus};
 use crate::theme::{self, Palette};
+use crate::widgets::text_input_plain;
 
 pub(crate) fn render(
     runtime: Option<&TerminalRuntime>,
@@ -18,12 +20,20 @@ pub(crate) fn render(
     font_size: f32,
     language: managi_core::Language,
     quick_open: bool,
+    sidebar_width: f32,
+    search: &Entity<InputState>,
+    search_open: bool,
     focus: &FocusHandle,
+    window: &Window,
     cx: &mut Context<AppView>,
 ) -> Div {
     let line_height = (font_size * 1.28).max(12.0);
     let cell_width = (font_size * 0.62).max(6.0);
     let quick_width = if quick_open { 156.0 } else { 0.0 };
+    let content_x = sidebar_width + quick_width + 8.0;
+    let content_y = BAR_HEIGHT + 8.0;
+    let screen_columns = runtime.map_or(1, |runtime| runtime.model.size().columns);
+    let screen_lines = runtime.map_or(1, |runtime| runtime.model.size().screen_lines);
 
     let mut screen = div()
         .relative()
@@ -38,8 +48,23 @@ pub(crate) fn render(
     if let Some(runtime) = runtime {
         let snapshot = runtime.model.snapshot();
         let mut rows = div().flex().flex_col().w_full();
-        for row in &snapshot.rows {
-            rows = rows.child(row_element(row, palette, font_size, line_height));
+        for (index, row) in snapshot.rows.iter().enumerate() {
+            let selection = snapshot.selection_rows.get(index).copied().flatten();
+            let spans: Vec<SnapshotSpan> = snapshot
+                .search_spans
+                .iter()
+                .filter(|span| span.row == index)
+                .copied()
+                .collect();
+            rows = rows.child(row_element(
+                row,
+                selection,
+                &spans,
+                palette,
+                font_size,
+                line_height,
+                cell_width,
+            ));
         }
         screen = screen.child(rows);
 
@@ -47,7 +72,7 @@ pub(crate) fn render(
             screen = screen.child(
                 div()
                     .absolute()
-                    .left(px(8.0 + quick_width + snapshot.cursor.column as f32 * cell_width))
+                    .left(px(8.0 + snapshot.cursor.column as f32 * cell_width))
                     .top(px(8.0 + snapshot.cursor.line as f32 * line_height))
                     .w(px(2.0))
                     .h(px(line_height))
@@ -216,8 +241,65 @@ pub(crate) fn render(
     let body = if runtime.is_some() {
         screen
             .track_focus(focus)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                this.term_focus.focus(window, cx);
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    let (line, column, _) = cell_at(
+                        event.position,
+                        content_x,
+                        content_y,
+                        cell_width,
+                        line_height,
+                        screen_columns,
+                        screen_lines,
+                    );
+                    this.terminal_mouse_down(
+                        line,
+                        column,
+                        event.click_count,
+                        event.modifiers.control,
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    let (line, column, _) = cell_at(
+                        event.position,
+                        content_x,
+                        content_y,
+                        cell_width,
+                        line_height,
+                        screen_columns,
+                        screen_lines,
+                    );
+                    this.terminal_context_menu(
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                        line,
+                        column,
+                        window,
+                        cx,
+                    );
+                }),
+            )
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                if event.pressed_button != Some(MouseButton::Left) {
+                    return;
+                }
+                let (line, column, tail) = cell_at(
+                    event.position,
+                    content_x,
+                    content_y,
+                    cell_width,
+                    line_height,
+                    screen_columns,
+                    screen_lines,
+                );
+                this.terminal_mouse_move(line, column, tail, cx);
             }))
             .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
                 let lines = match event.delta {
@@ -229,14 +311,17 @@ pub(crate) fn render(
                     cx.stop_propagation();
                 }
             }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                this.handle_terminal_key(event, cx);
-            }))
+            .on_key_down(cx.listener(
+                |this, event: &KeyDownEvent, window, cx| {
+                    this.handle_terminal_key(event, window, cx);
+                },
+            ))
     } else {
         screen
     };
 
     let mut main = div()
+        .relative()
         .flex_1()
         .flex()
         .flex_row()
@@ -246,6 +331,9 @@ pub(crate) fn render(
         main = main.child(quick_panel(language, strings, palette, cx));
     }
     main = main.child(body);
+    if search_open && runtime.is_some() {
+        main = main.child(search_bar(runtime, search, palette, window, cx));
+    }
 
     div()
         .flex_1()
@@ -255,6 +343,131 @@ pub(crate) fn render(
         .bg(palette.terminal_bg)
         .child(main)
         .child(toolbar)
+}
+
+fn cell_at(
+    position: Point<Pixels>,
+    origin_x: f32,
+    origin_y: f32,
+    cell_width: f32,
+    line_height: f32,
+    columns: usize,
+    lines: usize,
+) -> (usize, usize, bool) {
+    let x = (position.x.as_f32() - origin_x).max(0.0);
+    let y = (position.y.as_f32() - origin_y).max(0.0);
+    let column = ((x / cell_width).floor() as usize).min(columns.saturating_sub(1));
+    let line = ((y / line_height).floor() as usize).min(lines.saturating_sub(1));
+    let tail = x % cell_width >= cell_width / 2.0;
+    (line, column, tail)
+}
+
+fn search_bar(
+    runtime: Option<&TerminalRuntime>,
+    search: &Entity<InputState>,
+    palette: Palette,
+    window: &Window,
+    cx: &mut Context<AppView>,
+) -> Div {
+    let status = runtime.and_then(|runtime| runtime.model.search_status());
+    let count = status
+        .map(|(current, total)| format!("{current}/{total}"))
+        .unwrap_or_default();
+    let has_match = status.is_some_and(|(_, total)| total > 0);
+
+    let button = |id: &'static str, label: &'static str, enabled: bool| {
+        div()
+            .id(id)
+            .h(px(24.0))
+            .px(px(7.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(11.0))
+            .text_color(if enabled {
+                palette.font_1
+            } else {
+                palette.font_3
+            })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(move |style| style.bg(palette.hover_bg))
+            })
+            .child(label)
+    };
+
+    div()
+        .absolute()
+        .top(px(6.0))
+        .right(px(10.0))
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .px(px(6.0))
+        .bg(palette.panel_bg)
+        .border_1()
+        .border_color(palette.border)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            match event.keystroke.key.as_str() {
+                "enter" => this.terminal_search_step(!event.keystroke.modifiers.shift, cx),
+                "escape" => this.close_terminal_search(window, cx),
+                _ => {}
+            }
+        }))
+        .child(
+            div()
+                .text_size(px(13.0))
+                .text_color(palette.font_3)
+                .child("⌕"),
+        )
+        .child(
+            div()
+                .w(px(190.0))
+                .child(text_input_plain(search, palette, 24.0, 11.4, window, cx)),
+        )
+        .child(
+            div()
+                .min_w(px(38.0))
+                .text_size(px(10.5))
+                .text_color(if has_match {
+                    palette.font_2
+                } else {
+                    palette.font_3
+                })
+                .child(count),
+        )
+        .child(
+            button("terminal-search-prev", "↑", has_match).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.terminal_search_step(false, cx);
+                },
+            )),
+        )
+        .child(
+            button("terminal-search-next", "↓", has_match).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.terminal_search_step(true, cx);
+                },
+            )),
+        )
+        .child(
+            div()
+                .id("terminal-search-close")
+                .h(px(24.0))
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .cursor_pointer()
+                .text_size(px(12.0))
+                .text_color(palette.font_2)
+                .hover(move |style| style.bg(palette.hover_bg))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.close_terminal_search(window, cx);
+                }))
+                .child("×"),
+        )
 }
 
 fn quick_panel(
@@ -328,7 +541,15 @@ fn quick_panel(
         .child(list)
 }
 
-fn row_element(row: &SnapshotRow, palette: Palette, font_size: f32, line_height: f32) -> Div {
+fn row_element(
+    row: &SnapshotRow,
+    selection: Option<(usize, usize)>,
+    spans: &[SnapshotSpan],
+    palette: Palette,
+    font_size: f32,
+    line_height: f32,
+    cell_width: f32,
+) -> Div {
     let mut text = String::new();
     let mut runs = Vec::with_capacity(row.runs.len());
 
@@ -344,13 +565,42 @@ fn row_element(row: &SnapshotRow, palette: Palette, font_size: f32, line_height:
         text.push(' ');
     }
 
-    div()
+    let mut element = div()
+        .relative()
         .h(px(line_height))
         .w_full()
         .flex_shrink_0()
         .overflow_hidden()
-        .text_size(px(font_size))
-        .child(StyledText::new(text).with_runs(runs))
+        .text_size(px(font_size));
+
+    if let Some((start, end)) = selection {
+        element = element.child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(start as f32 * cell_width))
+                .w(px((end.saturating_sub(start)) as f32 * cell_width))
+                .h_full()
+                .bg(rgba(0x81A1C166)),
+        );
+    }
+    for span in spans {
+        element = element.child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(span.start as f32 * cell_width))
+                .w(px(span.end.saturating_sub(span.start) as f32 * cell_width))
+                .h_full()
+                .bg(if span.current {
+                    rgba(0xEBCB8B77)
+                } else {
+                    rgba(0x88C0D033)
+                }),
+        );
+    }
+
+    element.child(StyledText::new(text).with_runs(runs))
 }
 
 fn text_run(run: &SnapshotRun, end: usize, palette: Palette) -> TextRun {

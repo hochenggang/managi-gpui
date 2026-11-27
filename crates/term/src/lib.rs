@@ -5,6 +5,6 @@ pub mod model;
 
 pub use keys::encode_key;
 pub use model::{
-    SnapshotColor, SnapshotCursor, SnapshotRow, SnapshotRun, TerminalModel, TerminalSize,
-    TerminalSnapshot,
+    SnapshotColor, SnapshotCursor, SnapshotRow, SnapshotRun, SnapshotSpan, TerminalModel,
+    TerminalSize, TerminalSnapshot,
 };

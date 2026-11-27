@@ -38,6 +38,8 @@ pub struct AppView {
     pub(crate) batches: HashMap<String, BatchRuntime>,
     pub(crate) passwords: HashMap<String, String>,
     pub(crate) term_focus: FocusHandle,
+    pub(crate) term_search: Entity<InputState>,
+    pub(crate) terminal_search_open: bool,
     pub(crate) quick_open: bool,
     last_sftp_click: Option<(String, String, Instant)>,
 }
@@ -71,10 +73,24 @@ impl AppView {
             InputState::new(window, cx).placeholder(strings.batch_command_placeholder)
         });
 
+        let term_search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(strings.terminal_search_placeholder)
+        });
+
+        cx.subscribe_in(&term_search, window, |this, state, event, _window, cx| {
+            if matches!(event, InputEvent::Change) {
+                let query = state.read(cx).value().to_string();
+                this.update_terminal_search(&query, cx);
+            }
+        })
+        .detach();
+
         Self {
             state,
             search,
             batch_command,
+            term_search,
+            terminal_search_open: false,
             modal: None,
             menu: None,
             terminals: HashMap::new(),
@@ -425,6 +441,7 @@ impl AppView {
     pub(crate) fn handle_terminal_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(tab_id) = self.state.active_tab.clone() else {
@@ -435,36 +452,39 @@ impl AppView {
         let control = keystroke.modifiers.control;
         let shift = keystroke.modifiers.shift;
 
+        if control && key.eq_ignore_ascii_case("f") && !shift {
+            self.open_terminal_search(window, cx);
+            return;
+        }
         if control && shift && key.eq_ignore_ascii_case("k") {
             self.toggle_quick(cx);
             return;
         }
         if control && shift && key.eq_ignore_ascii_case("c") {
-            if let Some(runtime) = self.terminals.get(&tab_id) {
-                let text = runtime.model.screen_text();
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
-            }
+            let text = self
+                .terminals
+                .get(&tab_id)
+                .map(|runtime| {
+                    runtime
+                        .model
+                        .selection_text()
+                        .filter(|text| !text.is_empty())
+                        .unwrap_or_else(|| runtime.model.screen_text())
+                })
+                .unwrap_or_default();
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
             return;
         }
         if control && shift && key.eq_ignore_ascii_case("v") {
             let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
                 return;
             };
-            let Some(runtime) = self.terminals.get_mut(&tab_id) else {
-                return;
-            };
-            if !runtime.is_live() {
-                return;
-            }
-            let mut payload = text.replace("\r\n", "\n").replace('\n', "\r").into_bytes();
-            if runtime.bracketed_paste() {
-                let mut wrapped = Vec::with_capacity(payload.len() + 12);
-                wrapped.extend_from_slice(b"\x1b[200~");
-                wrapped.append(&mut payload);
-                wrapped.extend_from_slice(b"\x1b[201~");
-                runtime.handle.write(wrapped);
-            } else {
-                runtime.handle.write(payload);
+            self.paste_terminal_text(&text, cx);
+            return;
+        }
+        if control && shift && key.eq_ignore_ascii_case("a") {
+            if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+                runtime.model.select_all();
             }
             cx.notify();
             return;
@@ -497,6 +517,172 @@ impl AppView {
             runtime.handle.write(bytes);
         }
         cx.notify();
+    }
+
+    fn paste_terminal_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+            return;
+        };
+        if !runtime.is_live() {
+            return;
+        }
+        let mut payload = text.replace("\r\n", "\n").replace('\n', "\r").into_bytes();
+        if runtime.bracketed_paste() {
+            let mut wrapped = Vec::with_capacity(payload.len() + 12);
+            wrapped.extend_from_slice(b"\x1b[200~");
+            wrapped.append(&mut payload);
+            wrapped.extend_from_slice(b"\x1b[201~");
+            runtime.handle.write(wrapped);
+        } else {
+            runtime.handle.write(payload);
+        }
+        cx.notify();
+    }
+
+    /// 鼠标左键：Ctrl 点链接优先；否则开始选区。
+    pub(crate) fn terminal_mouse_down(
+        &mut self,
+        line: usize,
+        column: usize,
+        clicks: usize,
+        control: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.term_focus.focus(window, cx);
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+            return;
+        };
+        if control {
+            if let Some(url) = runtime.model.url_at(line, column) {
+                cx.open_url(&url);
+                return;
+            }
+        }
+        runtime.model.begin_selection_at(line, column, clicks);
+        cx.notify();
+    }
+
+    pub(crate) fn terminal_mouse_move(
+        &mut self,
+        line: usize,
+        column: usize,
+        tail: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.terminals.get_mut(&tab_id) else {
+            return;
+        };
+        if runtime.model.has_selection() {
+            runtime.model.update_selection(line, column, tail);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn terminal_context_menu(
+        &mut self,
+        x: f32,
+        y: f32,
+        line: usize,
+        column: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let strings = self.state.strings();
+        let has_link = self
+            .terminals
+            .get(&self.state.active_tab.clone().unwrap_or_default())
+            .and_then(|runtime| runtime.model.url_at(line, column))
+            .is_some();
+        let mut items = vec![
+            MenuItem {
+                label: strings.copy.to_string(),
+                action: MenuAction::CopySelection,
+                danger: false,
+            },
+            MenuItem {
+                label: strings.paste.to_string(),
+                action: MenuAction::PasteClipboard,
+                danger: false,
+            },
+            MenuItem {
+                label: strings.select_all.to_string(),
+                action: MenuAction::SelectAll,
+                danger: false,
+            },
+            MenuItem {
+                label: strings.terminal_search.to_string(),
+                action: MenuAction::SearchTerminal,
+                danger: false,
+            },
+            MenuItem {
+                label: strings.clear_screen.to_string(),
+                action: MenuAction::ClearScreen,
+                danger: false,
+            },
+        ];
+        if has_link {
+            items.insert(
+                0,
+                MenuItem {
+                    label: strings.open_link.to_string(),
+                    action: MenuAction::OpenLink(line, column),
+                    danger: false,
+                },
+            );
+        }
+        self.open_menu(x, y, items, window, cx);
+        cx.stop_propagation();
+    }
+
+    pub(crate) fn open_terminal_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.terminal_search_open = true;
+        let handle = self.term_search.read(cx).focus_handle(cx);
+        handle.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn close_terminal_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.terminal_search_open = false;
+        if let Some(tab_id) = self.state.active_tab.clone() {
+            if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+                runtime.model.clear_search();
+            }
+        }
+        self.term_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn update_terminal_search(&mut self, query: &str, cx: &mut Context<Self>) {
+        if !self.terminal_search_open {
+            return;
+        }
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+            runtime.model.set_search(query);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn terminal_search_step(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+            runtime.model.search_next(forward);
+            cx.notify();
+        }
     }
 
     pub(crate) fn scroll_active(&mut self, lines: i32, cx: &mut Context<Self>) {
@@ -1298,6 +1484,53 @@ impl AppView {
                 self.state.close_all();
                 cx.notify();
             }
+            MenuAction::CopySelection => {
+                if let Some(tab_id) = self.state.active_tab.clone() {
+                    if let Some(runtime) = self.terminals.get(&tab_id) {
+                        let text = runtime
+                            .model
+                            .selection_text()
+                            .filter(|text| !text.is_empty())
+                            .unwrap_or_else(|| runtime.model.screen_text());
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                }
+            }
+            MenuAction::PasteClipboard => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.paste_terminal_text(&text, cx);
+                }
+            }
+            MenuAction::SelectAll => {
+                if let Some(tab_id) = self.state.active_tab.clone() {
+                    if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+                        runtime.model.select_all();
+                    }
+                }
+                cx.notify();
+            }
+            MenuAction::SearchTerminal => self.open_terminal_search(window, cx),
+            MenuAction::ClearScreen => {
+                if let Some(tab_id) = self.state.active_tab.clone() {
+                    if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+                        if runtime.is_live() {
+                            runtime.handle.write(b"\x0c".to_vec());
+                        }
+                    }
+                }
+                cx.notify();
+            }
+            MenuAction::OpenLink(line, column) => {
+                if let Some(tab_id) = self.state.active_tab.clone() {
+                    if let Some(url) = self
+                        .terminals
+                        .get(&tab_id)
+                        .and_then(|runtime| runtime.model.url_at(line, column))
+                    {
+                        cx.open_url(&url);
+                    }
+                }
+            }
         }
     }
 
@@ -1419,6 +1652,11 @@ impl Render for AppView {
 
         let sidebar = crate::sidebar::render(&self.state, &self.search, &strings, palette, window, cx);
         let tabs = crate::tab_bar::render(&self.state, &strings, palette, cx);
+        let sidebar_width = if self.state.sidebar_collapsed {
+            SIDEBAR_COLLAPSED
+        } else {
+            SIDEBAR_WIDTH
+        };
         let workspace = crate::workspace::render(
             &self.state,
             &strings,
@@ -1428,7 +1666,10 @@ impl Render for AppView {
             &self.batches,
             &self.batch_command,
             &self.term_focus,
+            &self.term_search,
+            self.terminal_search_open,
             self.quick_open,
+            sidebar_width,
             window,
             cx,
         );

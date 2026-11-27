@@ -7,7 +7,7 @@
 
 ## 功能
 
-- SSH 终端：密码、私钥或自动认证、首次连接 TOFU 主机指纹、彩色与 CJK 宽字符、滚轮回看、`Ctrl+Shift+V` 粘贴、`Ctrl+Shift+C` 复制可见区、断线重连。
+- SSH 终端：密码、私钥或自动认证、首次连接 TOFU 主机指纹、彩色与 CJK 宽字符、滚轮回看、鼠标拖选与双击/三击选词选行、`Ctrl+Shift+C` 复制选区（无选区时复制可见区）、`Ctrl+F` 搜索输出、`Ctrl+Click` 打开链接、右键菜单、断线重连。
 - SSH 配置集成：读取 `~/.ssh/config`（支持 `Include` 与 `Host *` 默认项）并在侧栏“SSH 配置”分组只读展示；新增/编辑主机写入托管片段（默认 `~/.ssh/managi/config`，已有 `config.d` 时写入该目录），主配置只补一行 `Include`。
 - 凭据：密码与私钥口令存入系统钥匙串（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service），输入一次后可直接连接。
 - SFTP：目录浏览、上一级、刷新、新建目录、上传、下载、删除文件与空目录；传输进度显示在状态栏。
@@ -69,7 +69,8 @@ cargo run --locked --release -p managi-app --bin managi-gpui-selftest
 ## 已知限制
 
 - 中文输入法尚未接入 GPUI 的文本输入协议，终端内暂不能直接输入中文。
-- 鼠标拖选复制未实现；`Ctrl+Shift+C` 复制当前可见区而不是选中区。
+- 终端搜索只做当前网格与回看历史的纯文本匹配，不做正则；`Ctrl+F` 打开，`Enter`/`Shift+Enter` 跳下一/上一处。
+- 链接识别只认 `http://` 与 `https://`，需要按住 `Ctrl` 点击；没有悬停下划线提示。
 - 系统 `~/.ssh/config` 中带 `ProxyJump` / `ProxyCommand` 的主机暂不展示；系统原始 Host 只读，不覆盖同名 alias。
 - 私钥口令的“首次提示”尚未接入：加密私钥若钥匙串里没有口令，会直接认证失败。
 - SFTP 上传使用手输本地绝对路径，尚未接原生文件选择框；不支持递归上传目录或递归删除非空目录。
