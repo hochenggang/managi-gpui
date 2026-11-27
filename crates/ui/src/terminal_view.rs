@@ -23,10 +23,11 @@ pub(crate) fn mono_metrics(window: &Window, font_size: f32) -> (f32, f32) {
         .unwrap_or(font_size * 0.6)
         .max(6.0);
     let ascent = text_system.ascent(font_id, size).as_f32();
-    let descent = text_system.descent(font_id, size).as_f32();
-    // descent 为负值，ascent - descent 即字体的完整上下包围盒。
-    // 之前 1.28em 的行高小于它，g / y 这类下伸字母会被裁脚。
-    let line_height = (ascent - descent + 2.0).max(font_size * 1.35);
+    // 不同平台返回的 descent 正负不一致；统一取绝对值。
+    // 否则 ascent - descent 会把下伸空间减掉，g / y / p 就会被裁脚。
+    let descent = text_system.descent(font_id, size).as_f32().abs();
+    // 行高覆盖完整字体包围盒并留 5px 呼吸位，再用 1.55em 兜底。
+    let line_height = (ascent + descent + 5.0).max(font_size * 1.55);
     (cell_width, line_height)
 }
 
@@ -93,9 +94,9 @@ pub(crate) fn render(
                 div()
                     .absolute()
                     .left(px(8.0 + snapshot.cursor.column as f32 * cell_width))
-                    .top(px(8.0 + snapshot.cursor.line as f32 * line_height))
+                    .top(px(8.0 + snapshot.cursor.line as f32 * line_height + 1.0))
                     .w(px(2.0))
-                    .h(px(line_height))
+                    .h(px((line_height - 2.0).max(font_size * 1.15)))
                     .bg(palette.accent),
             );
         }
@@ -672,7 +673,7 @@ fn row_element(
         .h(px(line_height))
         .w_full()
         .flex_shrink_0()
-        .overflow_hidden()
+        // 行容器不裁切，下伸字母由屏幕整体边界裁切。
         .text_size(px(font_size));
 
     element = element.child(StyledText::new(text).with_runs(runs));
@@ -687,7 +688,7 @@ fn row_element(
                 .left(px(start as f32 * cell_width))
                 .w(px((end.saturating_sub(start)) as f32 * cell_width))
                 .h_full()
-                .bg(rgba(0x81A1C166)),
+                .bg(rgba(0x88C0D0AA)),
         );
     }
     for span in spans {

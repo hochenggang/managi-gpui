@@ -115,8 +115,11 @@ impl SftpRuntime {
     }
 
     pub fn download(&mut self, name: &str) {
+        self.download_to(name, managi_ssh::download_root().join(name));
+    }
+
+    pub fn download_to(&mut self, name: &str, local: std::path::PathBuf) {
         let remote = join_path(&self.path, name);
-        let local = managi_ssh::download_root().join(name);
         self.progress = Some((format!("下载 {name}"), 0));
         self.message = None;
         self.error = None;

@@ -42,6 +42,7 @@ pub struct AppView {
     pub(crate) terminal_search_open: bool,
     pub(crate) cursor_blink_at: Instant,
     pub(crate) quick_open: bool,
+    key_interceptor: Option<Subscription>,
     last_sftp_click: Option<(String, String, Instant)>,
 }
 
@@ -107,7 +108,7 @@ impl AppView {
         })
         .detach();
 
-        Self {
+        let mut view = Self {
             state,
             search,
             batch_command,
@@ -122,8 +123,53 @@ impl AppView {
             passwords: HashMap::new(),
             term_focus: cx.focus_handle(),
             quick_open: false,
+            key_interceptor: None,
             last_sftp_click: None,
-        }
+        };
+
+        // GPUI 在事件监听前就先匹配并执行 Tab 的焦点遍历绑定，
+        // capture_key_down 收不到 Tab。这里用更早的 keystroke
+        // interceptor 截住终端里的 Tab，再手动发给远端 shell。
+        let handle = cx.entity();
+        view.key_interceptor = Some(cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            if !keystroke.key.eq_ignore_ascii_case("tab")
+                || keystroke.modifiers.control
+                || keystroke.modifiers.alt
+            {
+                return;
+            }
+            let reverse = keystroke.modifiers.shift;
+            let sent = handle
+                .update(cx, |this, cx| {
+                    if !this.term_focus.is_focused(window) || this.terminal_search_open {
+                        return false;
+                    }
+                    let Some(tab_id) = this.state.active_tab.clone() else {
+                        return false;
+                    };
+                    let Some(runtime) = this.terminals.get_mut(&tab_id) else {
+                        return false;
+                    };
+                    if !runtime.is_live() {
+                        return false;
+                    }
+                    runtime.handle.write(if reverse {
+                        b"\x1b[Z".to_vec()
+                    } else {
+                        b"\t".to_vec()
+                    });
+                    this.cursor_blink_at = Instant::now();
+                    cx.notify();
+                    true
+                })
+                .unwrap_or(false);
+            if sent {
+                cx.stop_propagation();
+            }
+        }));
+
+        view
     }
 
     /// 先查进程内缓存，再查系统钥匙串；命中后写回缓存，避免重复打开凭据库。
@@ -873,8 +919,11 @@ impl AppView {
         cx.notify();
     }
 
-    pub(crate) fn sftp_download(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sftp_download(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let strings = self.state.strings();
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
         let selection = self.active_sftp_mut().and_then(|runtime| {
             let name = runtime.selected.clone()?;
             let is_file = runtime
@@ -893,10 +942,24 @@ impl AppView {
             cx.notify();
             return;
         }
-        if let Some(runtime) = self.active_sftp_mut() {
-            runtime.download(&name);
-        }
-        cx.notify();
+
+        // 下载不再静默写入固定目录：弹系统保存对话框，路径和结果都看得见。
+        let root = managi_ssh::download_root();
+        let _ = std::fs::create_dir_all(&root);
+        let receiver = cx.prompt_for_new_path(&root, Some(&name));
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if let Some(runtime) = this.sftp.get_mut(&tab_id) {
+                    runtime.download_to(&name, path);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(crate) fn sftp_delete(&mut self, cx: &mut Context<Self>) {

@@ -22,7 +22,11 @@ pub(crate) fn render(
         .flex()
         .flex_col()
         .min_h(px(0.0))
-        .bg(palette.panel_bg);
+        .bg(palette.panel_bg)
+        // 整个 SFTP 页面都接收拖入文件，不要求正好落在列表区域。
+        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+            this.sftp_drop_upload(paths.paths(), cx);
+        }));
 
     let path = runtime.map(|runtime| runtime.path.clone()).unwrap_or_default();
     let mut toolbar = div()
@@ -121,8 +125,8 @@ pub(crate) fn render(
             strings.sftp_download,
             palette,
             live && selected_is_file,
-            cx.listener(|this, _, _, cx| {
-                this.sftp_download(cx);
+            cx.listener(|this, _, window, cx| {
+                this.sftp_download(window, cx);
             }),
         )
         .into_any_element(),
@@ -161,10 +165,7 @@ pub(crate) fn render(
         .min_h(px(0.0))
         .overflow_y_scroll()
         .scrollbar_width(px(0.0))
-        .font(theme::ui_font())
-        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-            this.sftp_drop_upload(paths.paths(), cx);
-        }));
+        .font(theme::ui_font());
     list = list.child(
         div()
             .h(px(28.0))
