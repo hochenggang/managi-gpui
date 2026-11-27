@@ -110,6 +110,8 @@ pub(crate) struct Strings {
     pub batch_running: &'static str,
     pub batch_stopped: &'static str,
     pub batch_exit: &'static str,
+    pub batch_done: &'static str,
+    pub batch_no_output: &'static str,
 }
 
 pub(crate) const ZH: Strings = Strings {
@@ -219,6 +221,8 @@ pub(crate) const ZH: Strings = Strings {
     batch_running: "执行中…",
     batch_stopped: "已停止",
     batch_exit: "退出码",
+    batch_done: "完成",
+    batch_no_output: "无输出",
 };
 
 pub(crate) const EN: Strings = Strings {
@@ -328,6 +332,8 @@ pub(crate) const EN: Strings = Strings {
     batch_running: "Running…",
     batch_stopped: "Stopped",
     batch_exit: "Exit code",
+    batch_done: "Done",
+    batch_no_output: "No output",
 };
 
 impl Strings {

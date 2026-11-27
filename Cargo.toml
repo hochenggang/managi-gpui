@@ -29,8 +29,9 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 directories = "6"
 
 [profile.release]
-opt-level = 3
+# 体积优先：Windows 单文件目标 ≤25 MB。
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-panic = "unwind"
+panic = "abort"

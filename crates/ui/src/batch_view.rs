@@ -133,7 +133,7 @@ fn host_card(
 ) -> Div {
     let status = match &host.state {
         HostState::Running => (strings.batch_running.to_string(), palette.yellow),
-        HostState::Done { code: None, .. } => ("完成".to_string(), palette.green),
+        HostState::Done { code: None, .. } => (strings.batch_done.to_string(), palette.green),
         HostState::Done { code: Some(0), .. } => ("0".to_string(), palette.green),
         HostState::Done { code: Some(code), .. } => (format!("{} {code}", strings.batch_exit), palette.red),
         HostState::Error(message) => (message.clone(), palette.red),
@@ -191,7 +191,7 @@ fn host_card(
     let output = match &host.state {
         HostState::Done { output, .. } => {
             if output.trim().is_empty() {
-                "(no output)".to_string()
+                strings.batch_no_output.to_string()
             } else {
                 output.clone()
             }
