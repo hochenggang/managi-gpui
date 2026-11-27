@@ -330,7 +330,7 @@ pub(crate) fn render(
                     cx.stop_propagation();
                 }
             }))
-            .on_key_down(cx.listener(
+            .capture_key_down(cx.listener(
                 |this, event: &KeyDownEvent, window, cx| {
                     this.handle_terminal_key(event, window, cx);
                 },
