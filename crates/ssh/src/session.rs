@@ -258,7 +258,11 @@ pub(crate) async fn connect_and_authenticate(
     request: &ConnectRequest,
 ) -> Result<Handle<ClientHandler>, String> {
     let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(60)),
+        // 只设 inactivity_timeout 会让 SFTP 在用户浏览文件时静默失效；
+        // 用 SSH keepalive 保活，同时保留失联检测（3 次无响应后关闭）。
+        inactivity_timeout: Some(Duration::from_secs(120)),
+        keepalive_interval: Some(Duration::from_secs(20)),
+        keepalive_max: 3,
         nodelay: true,
         ..client::Config::default()
     });

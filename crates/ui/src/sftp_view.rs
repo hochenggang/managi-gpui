@@ -56,6 +56,7 @@ pub(crate) fn render(
         );
 
     let live = runtime.is_some_and(|runtime| runtime.connected);
+    let needs_reconnect = runtime.is_some_and(|runtime| !runtime.connected && !runtime.loading);
     toolbar = toolbar.child(
         tool_button(
             "sftp-up",
@@ -138,6 +139,20 @@ pub(crate) fn render(
         )
         .into_any_element(),
     );
+    if needs_reconnect {
+        toolbar = toolbar.child(
+            tool_button(
+                "sftp-reconnect",
+                strings.reconnect,
+                palette,
+                true,
+                cx.listener(|this, _, window, cx| {
+                    this.reconnect_sftp_active(window, cx);
+                }),
+            )
+            .into_any_element(),
+        );
+    }
     root = root.child(toolbar);
 
     let mut list = div()
@@ -280,7 +295,7 @@ pub(crate) fn render(
             if let Some((label, percent)) = &runtime.progress {
                 (format!("{label} {percent}%"), palette.yellow)
             } else {
-                (strings.sftp_refresh.to_string(), palette.green)
+                (strings.connected.to_string(), palette.green)
             }
         }
         Some(runtime) => (

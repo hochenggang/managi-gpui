@@ -689,7 +689,9 @@ impl AppView {
 
         for (tab_id, runtime) in &mut self.sftp {
             let changed = runtime.poll();
-            if runtime.is_live() {
+            // 握手完成前连接态还是 false；只要还在加载就必须继续出帧，否则失败事件
+            // 会因为没有下一帧而永远读不到。
+            if runtime.loading || runtime.progress.is_some() || runtime.is_live() {
                 animate = true;
             }
             if changed && active_kind == Some(TabKind::Sftp) && active_tab.as_deref() == Some(tab_id.as_str()) {
