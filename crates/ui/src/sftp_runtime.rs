@@ -9,6 +9,7 @@ pub struct SftpRuntime {
     pub entries: Vec<SftpEntry>,
     pub loading: bool,
     pub error: Option<String>,
+    pub message: Option<String>,
     pub progress: Option<(String, u8)>,
     pub connected: bool,
     pub selected: Option<String>,
@@ -23,6 +24,7 @@ impl SftpRuntime {
             entries: Vec::new(),
             loading: true,
             error: None,
+            message: None,
             progress: None,
             connected: false,
             selected: None,
@@ -49,15 +51,18 @@ impl SftpRuntime {
                 }
                 SftpEvent::Progress { label, percent } => {
                     self.progress = Some((label, percent));
+                    self.message = None;
                 }
-                SftpEvent::Done { .. } => {
+                SftpEvent::Done { label } => {
                     self.progress = None;
                     self.error = None;
+                    self.message = Some(label);
                     self.refresh();
                 }
                 SftpEvent::Failed { label, message } => {
                     self.progress = None;
                     self.loading = false;
+                    self.message = None;
                     self.error = Some(if label.is_empty() {
                         message
                     } else {
@@ -112,6 +117,9 @@ impl SftpRuntime {
     pub fn download(&mut self, name: &str) {
         let remote = join_path(&self.path, name);
         let local = managi_ssh::download_root().join(name);
+        self.progress = Some((format!("下载 {name}"), 0));
+        self.message = None;
+        self.error = None;
         self.handle.send(SftpCommand::Download { remote, local });
     }
 
@@ -124,6 +132,9 @@ impl SftpRuntime {
             return;
         };
         let remote = join_path(&self.path, &name);
+        self.progress = Some((format!("上传 {name}"), 0));
+        self.message = None;
+        self.error = None;
         self.handle.send(SftpCommand::Upload { local, remote });
     }
 

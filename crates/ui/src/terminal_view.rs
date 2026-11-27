@@ -12,6 +12,24 @@ use crate::terminal_runtime::{TerminalRuntime, TerminalStatus};
 use crate::theme::{self, Palette};
 use crate::widgets::text_input_plain;
 
+pub(crate) fn mono_metrics(window: &Window, font_size: f32) -> (f32, f32) {
+    let font = theme::mono_font();
+    let text_system = window.text_system();
+    let font_id = text_system.resolve_font(&font);
+    let size = px(font_size);
+    let cell_width = text_system
+        .ch_advance(font_id, size)
+        .map(|width| width.as_f32())
+        .unwrap_or(font_size * 0.6)
+        .max(6.0);
+    let ascent = text_system.ascent(font_id, size).as_f32();
+    let descent = text_system.descent(font_id, size).as_f32();
+    // descent 为负值，ascent - descent 即字体的完整上下包围盒。
+    // 之前 1.28em 的行高小于它，g / y 这类下伸字母会被裁脚。
+    let line_height = (ascent - descent + 2.0).max(font_size * 1.35);
+    (cell_width, line_height)
+}
+
 pub(crate) fn render(
     runtime: Option<&TerminalRuntime>,
     node: Option<&Node>,
@@ -23,12 +41,12 @@ pub(crate) fn render(
     sidebar_width: f32,
     search: &Entity<InputState>,
     search_open: bool,
+    cursor_blink_on: bool,
     focus: &FocusHandle,
     window: &Window,
     cx: &mut Context<AppView>,
 ) -> Div {
-    let line_height = (font_size * 1.28).max(12.0);
-    let cell_width = (font_size * 0.62).max(6.0);
+    let (cell_width, line_height) = mono_metrics(window, font_size);
     let quick_width = if quick_open { 156.0 } else { 0.0 };
     let content_x = sidebar_width + quick_width + 8.0;
     let content_y = BAR_HEIGHT + 8.0;
@@ -68,7 +86,7 @@ pub(crate) fn render(
         }
         screen = screen.child(rows);
 
-        if snapshot.cursor.visible {
+        if snapshot.cursor.visible && cursor_blink_on {
             screen = screen.child(
                 div()
                     .absolute()
@@ -573,6 +591,10 @@ fn row_element(
         .overflow_hidden()
         .text_size(px(font_size));
 
+    element = element.child(StyledText::new(text).with_runs(runs));
+
+    // 高亮层必须压在文字之上：每个 TextRun 都带不透明单元格底色，
+    // 若先画高亮会被文字底色整块盖住，看起来像“选了但没反应”。
     if let Some((start, end)) = selection {
         element = element.child(
             div()
@@ -600,7 +622,7 @@ fn row_element(
         );
     }
 
-    element.child(StyledText::new(text).with_runs(runs))
+    element
 }
 
 fn text_run(run: &SnapshotRun, end: usize, palette: Palette) -> TextRun {

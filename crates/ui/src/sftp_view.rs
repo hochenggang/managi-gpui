@@ -161,7 +161,10 @@ pub(crate) fn render(
         .min_h(px(0.0))
         .overflow_y_scroll()
         .scrollbar_width(px(0.0))
-        .font(theme::ui_font());
+        .font(theme::ui_font())
+        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+            this.sftp_drop_upload(paths.paths(), cx);
+        }));
     list = list.child(
         div()
             .h(px(28.0))
@@ -197,6 +200,16 @@ pub(crate) fn render(
                     .text_size(px(11.2))
                     .text_color(palette.red)
                     .child(error.clone()),
+            );
+        }
+        if let Some(message) = &runtime.message {
+            list = list.child(
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(px(11.2))
+                    .text_color(palette.green)
+                    .child(message.clone()),
             );
         }
         if runtime.loading {
@@ -294,6 +307,8 @@ pub(crate) fn render(
         Some(runtime) if runtime.connected => {
             if let Some((label, percent)) = &runtime.progress {
                 (format!("{label} {percent}%"), palette.yellow)
+            } else if let Some(message) = &runtime.message {
+                (message.clone(), palette.green)
             } else {
                 (strings.connected.to_string(), palette.green)
             }

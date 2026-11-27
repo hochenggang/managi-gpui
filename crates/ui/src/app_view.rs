@@ -40,6 +40,7 @@ pub struct AppView {
     pub(crate) term_focus: FocusHandle,
     pub(crate) term_search: Entity<InputState>,
     pub(crate) terminal_search_open: bool,
+    pub(crate) cursor_blink_at: Instant,
     pub(crate) quick_open: bool,
     last_sftp_click: Option<(String, String, Instant)>,
 }
@@ -85,12 +86,34 @@ impl AppView {
         })
         .detach();
 
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+            let alive = this
+                .update(cx, |this, cx| {
+                    if this
+                        .state
+                        .active_tab()
+                        .is_some_and(|tab| tab.kind == TabKind::Terminal)
+                    {
+                        cx.notify();
+                    }
+                })
+                .is_ok();
+            if !alive {
+                break;
+            }
+        })
+        .detach();
+
         Self {
             state,
             search,
             batch_command,
             term_search,
             terminal_search_open: false,
+            cursor_blink_at: Instant::now(),
             modal: None,
             menu: None,
             terminals: HashMap::new(),
@@ -438,6 +461,11 @@ impl AppView {
         }
     }
 
+    pub(crate) fn cursor_blink_on(&self) -> bool {
+        let elapsed = self.cursor_blink_at.elapsed().as_millis();
+        elapsed < 500 || (elapsed / 500) % 2 == 0
+    }
+
     pub(crate) fn handle_terminal_key(
         &mut self,
         event: &KeyDownEvent,
@@ -451,6 +479,7 @@ impl AppView {
         let key = keystroke.key.as_str();
         let control = keystroke.modifiers.control;
         let shift = keystroke.modifiers.shift;
+        self.cursor_blink_at = Instant::now();
 
         if control && key.eq_ignore_ascii_case("f") && !shift {
             self.open_terminal_search(window, cx);
@@ -497,6 +526,19 @@ impl AppView {
             self.scroll_active(-8, cx);
             return;
         }
+        // Tab 直接写进终端并截断事件，避免被 GPUI 的焦点遍历吃掉。
+        if !control && key.eq_ignore_ascii_case("tab") {
+            if let Some(runtime) = self.terminals.get_mut(&tab_id) {
+                if runtime.is_live() {
+                    runtime
+                        .handle
+                        .write(if shift { b"\x1b[Z".to_vec() } else { b"\t".to_vec() });
+                }
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
 
         let Some(runtime) = self.terminals.get_mut(&tab_id) else {
             return;
@@ -520,6 +562,7 @@ impl AppView {
     }
 
     fn paste_terminal_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.cursor_blink_at = Instant::now();
         let Some(tab_id) = self.state.active_tab.clone() else {
             return;
         };
@@ -553,6 +596,7 @@ impl AppView {
         cx: &mut Context<Self>,
     ) {
         self.term_focus.focus(window, cx);
+        self.cursor_blink_at = Instant::now();
         let Some(tab_id) = self.state.active_tab.clone() else {
             return;
         };
@@ -777,7 +821,7 @@ impl AppView {
         );
     }
 
-    pub(crate) fn sftp_upload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn sftp_upload(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab_id) = self.state.active_tab.clone() else {
             return;
         };
@@ -785,13 +829,48 @@ impl AppView {
             return;
         }
         let strings = self.state.strings();
-        self.open_prompt(
-            strings.sftp_upload_title.to_string(),
-            None,
-            PromptAction::SftpUpload(tab_id),
-            window,
-            cx,
-        );
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(strings.sftp_upload_title.into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                let Some(runtime) = this.sftp.get_mut(&tab_id) else {
+                    return;
+                };
+                for path in paths {
+                    runtime.upload(path);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn sftp_drop_upload(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let Some(tab_id) = self.state.active_tab.clone() else {
+            return;
+        };
+        let Some(runtime) = self.sftp.get_mut(&tab_id) else {
+            return;
+        };
+        let mut sent = 0usize;
+        for path in paths {
+            if path.is_file() {
+                runtime.upload(path.clone());
+                sent += 1;
+            }
+        }
+        if sent == 0 {
+            runtime.error = Some("只支持拖入文件，暂不支持目录".into());
+        }
+        cx.notify();
     }
 
     pub(crate) fn sftp_download(&mut self, cx: &mut Context<Self>) {
@@ -959,12 +1038,15 @@ impl AppView {
             .retain(|tab_id, _| valid_tabs.iter().any(|id| id == tab_id));
 
         let font_size = f32::from(self.state.config.settings.terminal_font_size);
+        let quick_width = if self.quick_open { 156.0 } else { 0.0 };
         let width = window.bounds().size.width.as_f32()
             - sidebar_width(self.state.sidebar_collapsed)
+            - quick_width
             - 16.0;
         let height = window.bounds().size.height.as_f32() - BAR_HEIGHT * 2.0 - 16.0;
-        let columns = ((width / (font_size * 0.62)).floor() as u16).max(20);
-        let rows = ((height / (font_size * 1.28)).floor() as u16).max(4);
+        let (cell_width, line_height) = crate::terminal_view::mono_metrics(window, font_size);
+        let columns = ((width / cell_width).floor() as u16).max(20);
+        let rows = ((height / line_height).floor() as u16).max(4);
 
         let mut animate = false;
         for (tab_id, runtime) in &mut self.terminals {
@@ -1046,7 +1128,6 @@ impl AppView {
         let strings = self.state.strings();
         let placeholder = match &action {
             PromptAction::ConnectNode { .. } => strings.password_placeholder,
-            PromptAction::SftpUpload(_) => strings.sftp_upload_placeholder,
             PromptAction::SftpMkdir(_) => strings.sftp_dir_placeholder,
             PromptAction::NewGroup => strings.new_group_placeholder,
             PromptAction::RenameGroup(_) => strings.rename_group_placeholder,
@@ -1253,20 +1334,6 @@ impl AppView {
                 self.modal = None;
                 if let Some(runtime) = self.sftp.get_mut(&tab_id) {
                     runtime.mkdir(&value);
-                }
-                cx.notify();
-                return;
-            }
-            PromptAction::SftpUpload(tab_id) => {
-                let path = PathBuf::from(value);
-                if !path.is_file() {
-                    self.set_modal_error(strings.sftp_local_required.to_string());
-                    cx.notify();
-                    return;
-                }
-                self.modal = None;
-                if let Some(runtime) = self.sftp.get_mut(&tab_id) {
-                    runtime.upload(path);
                 }
                 cx.notify();
                 return;
@@ -1668,6 +1735,7 @@ impl Render for AppView {
             &self.term_focus,
             &self.term_search,
             self.terminal_search_open,
+            self.cursor_blink_on(),
             self.quick_open,
             sidebar_width,
             window,

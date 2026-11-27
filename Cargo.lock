@@ -4468,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "managi-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui-kit",
  "managi-core",
@@ -4482,7 +4482,7 @@ dependencies = [
 
 [[package]]
 name = "managi-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "directories",
  "keyring",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "managi-ssh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "russh",
  "russh-sftp",
@@ -4504,14 +4504,14 @@ dependencies = [
 
 [[package]]
 name = "managi-term"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
 ]
 
 [[package]]
 name = "managi-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui-kit",
  "managi-core",

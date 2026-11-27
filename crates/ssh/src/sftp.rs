@@ -167,7 +167,7 @@ async fn run(
                 match result {
                     Ok(()) => {
                         let _ = events.send(SftpEvent::Done {
-                            label: format!("{label} → {}", local.display()),
+                            label: format!("已下载 {label} → {}", local.display()),
                         });
                     }
                     Err(error) => {
@@ -190,7 +190,9 @@ async fn run(
                 let result = upload(&sftp, &local, &remote, &events, &label).await;
                 match result {
                     Ok(()) => {
-                        let _ = events.send(SftpEvent::Done { label });
+                        let _ = events.send(SftpEvent::Done {
+                            label: format!("已上传 {label}"),
+                        });
                     }
                     Err(error) => {
                         let _ = events.send(SftpEvent::Failed {

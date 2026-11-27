@@ -100,7 +100,6 @@ pub(crate) enum PromptAction {
     RenameGroup(String),
     ConnectNode { node_id: String, kind: TabKind },
     SftpMkdir(String),
-    SftpUpload(String),
 }
 
 pub(crate) struct PromptModal {
