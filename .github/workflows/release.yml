@@ -1,0 +1,111 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2022
+            artifact: managi-gpui-windows-x64
+            binary: target/release/managi-gpui.exe
+            asset: managi-gpui.exe
+          - name: linux-x64
+            os: ubuntu-24.04
+            artifact: managi-gpui-linux-x64
+            binary: target/release/managi-gpui
+            asset: managi-gpui
+          - name: macos-arm64
+            os: macos-15
+            artifact: managi-gpui-macos-arm64
+            binary: target/release/managi-gpui
+            asset: managi-gpui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Linux 依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ clang cmake pkg-config \
+            libfontconfig-dev libfreetype-dev \
+            libwayland-dev wayland-protocols libxkbcommon-x11-dev \
+            libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libssl-dev libzstd-dev libasound2-dev \
+            libvulkan-dev libvulkan1 vulkan-validationlayers \
+            libwebkit2gtk-4.1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: 构建发布版
+        run: cargo build --release --bins --locked
+
+      - name: 校验二进制可运行（无窗口）
+        run: cargo run --locked --release -p managi-app --bin managi-gpui-selftest
+
+      - name: 计算 SHA256（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash target/release/managi-gpui.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  managi-gpui.exe" | Set-Content "${{ matrix.artifact }}.sha256"
+
+      - name: 计算 SHA256（Unix）
+        if: runner.os != 'Windows'
+        run: |
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum target/release/managi-gpui | sed 's#target/release/##' > "${{ matrix.artifact }}.sha256"
+          else
+            shasum -a 256 target/release/managi-gpui | sed 's#target/release/##' > "${{ matrix.artifact }}.sha256"
+          fi
+
+      - name: 上传二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+      - name: 上传校验和
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-sha256
+          path: ${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/**/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

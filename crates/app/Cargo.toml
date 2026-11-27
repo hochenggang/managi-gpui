@@ -23,3 +23,6 @@ managi-term = { path = "../term" }
 managi-ui = { path = "../ui" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
