@@ -329,6 +329,10 @@ impl AppView {
         let control = keystroke.modifiers.control;
         let shift = keystroke.modifiers.shift;
 
+        if control && shift && key.eq_ignore_ascii_case("k") {
+            self.toggle_quick(cx);
+            return;
+        }
         if control && shift && key.eq_ignore_ascii_case("c") {
             if let Some(runtime) = self.terminals.get(&tab_id) {
                 let text = runtime.model.screen_text();
