@@ -140,30 +140,28 @@ impl AppView {
                 return;
             }
             let reverse = keystroke.modifiers.shift;
-            let sent = handle
-                .update(cx, |this, cx| {
-                    if !this.term_focus.is_focused(window) || this.terminal_search_open {
-                        return false;
-                    }
-                    let Some(tab_id) = this.state.active_tab.clone() else {
-                        return false;
-                    };
-                    let Some(runtime) = this.terminals.get_mut(&tab_id) else {
-                        return false;
-                    };
-                    if !runtime.is_live() {
-                        return false;
-                    }
-                    runtime.handle.write(if reverse {
-                        b"\x1b[Z".to_vec()
-                    } else {
-                        b"\t".to_vec()
-                    });
-                    this.cursor_blink_at = Instant::now();
-                    cx.notify();
-                    true
-                })
-                .unwrap_or(false);
+            let sent = handle.update(cx, |this, cx| {
+                if !this.term_focus.is_focused(window) || this.terminal_search_open {
+                    return false;
+                }
+                let Some(tab_id) = this.state.active_tab.clone() else {
+                    return false;
+                };
+                let Some(runtime) = this.terminals.get_mut(&tab_id) else {
+                    return false;
+                };
+                if !runtime.is_live() {
+                    return false;
+                }
+                runtime.handle.write(if reverse {
+                    b"\x1b[Z".to_vec()
+                } else {
+                    b"\t".to_vec()
+                });
+                this.cursor_blink_at = Instant::now();
+                cx.notify();
+                true
+            });
             if sent {
                 cx.stop_propagation();
             }
