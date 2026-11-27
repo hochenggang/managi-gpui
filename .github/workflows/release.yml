@@ -50,6 +50,7 @@ jobs:
             libwayland-dev wayland-protocols libxkbcommon-x11-dev \
             libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libssl-dev libzstd-dev libasound2-dev \
+            libdbus-1-dev \
             libvulkan-dev libvulkan1 vulkan-validationlayers \
             libwebkit2gtk-4.1-dev
 
@@ -59,10 +60,10 @@ jobs:
           cache-on-failure: true
 
       - name: 构建发布版
-        run: cargo build --release --bins --locked
+        run: cargo build --release --bins
 
       - name: 校验二进制可运行（无窗口）
-        run: cargo run --locked --release -p managi-app --bin managi-gpui-selftest
+        run: cargo run --release -p managi-app --bin managi-gpui-selftest
 
       - name: 准备平台命名产物（Windows）
         if: runner.os == 'Windows'

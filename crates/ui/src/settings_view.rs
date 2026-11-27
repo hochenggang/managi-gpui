@@ -67,7 +67,7 @@ pub(crate) fn render(
     let content = match state.settings_section {
         SettingsSection::Appearance => appearance_section(state, strings, palette, cx),
         SettingsSection::Terminal => terminal_section(state, strings, palette, cx),
-        SettingsSection::Data => data_section(state, strings, palette),
+        SettingsSection::Data => data_section(state, strings, palette, cx),
         SettingsSection::About => about_section(state, strings, palette),
     };
 
@@ -349,7 +349,12 @@ fn terminal_section(
         .child(setting_row(strings.font_family, families, palette))
 }
 
-fn data_section(state: &AppState, strings: &Strings, palette: Palette) -> Div {
+fn data_section(
+    state: &AppState,
+    strings: &Strings,
+    palette: Palette,
+    cx: &mut Context<AppView>,
+) -> Div {
     div()
         .flex()
         .flex_col()
@@ -366,8 +371,18 @@ fn data_section(state: &AppState, strings: &Strings, palette: Palette) -> Div {
             div()
                 .flex()
                 .gap(px(8.0))
-                .child(disabled_button(strings.export_config, palette))
-                .child(disabled_button(strings.import_config, palette))
+                .child(action_button(
+                    "settings-export",
+                    strings.export_config,
+                    palette,
+                    cx.listener(|this, _, _, cx| this.export_config(cx)),
+                ))
+                .child(action_button(
+                    "settings-import",
+                    strings.import_config,
+                    palette,
+                    cx.listener(|this, _, _, cx| this.import_config(cx)),
+                ))
                 .child(
                     div()
                         .flex()
@@ -415,8 +430,14 @@ fn step_button(label: &'static str, palette: Palette) -> Div {
         .child(label.to_string())
 }
 
-fn disabled_button(label: &'static str, palette: Palette) -> Div {
+fn action_button(
+    id: &'static str,
+    label: &'static str,
+    palette: Palette,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     div()
+        .id(id)
         .h(px(30.0))
         .px(px(14.0))
         .flex()
@@ -426,6 +447,8 @@ fn disabled_button(label: &'static str, palette: Palette) -> Div {
         .border_color(palette.border)
         .text_color(palette.font_1)
         .text_size(px(12.8))
-        .opacity(0.5)
+        .cursor_pointer()
+        .hover(move |style| style.border_color(palette.accent).text_color(palette.accent))
+        .on_click(on_click)
         .child(label.to_string())
 }

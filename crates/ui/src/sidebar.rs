@@ -9,7 +9,7 @@ use crate::assets::icons;
 use crate::i18n::Strings;
 use crate::state::{AppState, TabKind};
 use crate::theme::Palette;
-use crate::widgets::{icon, text_input};
+use crate::widgets::{icon, text_input_plain};
 
 pub(crate) fn render(
     state: &AppState,
@@ -71,7 +71,7 @@ pub(crate) fn render(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(text_input(search, palette, 32.0, 11.2, window, cx)),
+                        .child(text_input_plain(search, palette, 32.0, 11.2, window, cx)),
                 )
                 .child(
                     div()
@@ -244,6 +244,11 @@ fn node_row(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                 let items = this.node_menu(&menu_node);
+                if items.is_empty() {
+                    this.state.notice = Some(this.state.strings().ssh_readonly.to_string());
+                    cx.notify();
+                    return;
+                }
                 this.open_menu(
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),

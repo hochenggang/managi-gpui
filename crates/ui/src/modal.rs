@@ -2,7 +2,7 @@
 
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
-use managi_core::{AuthKind, Node};
+use managi_core::{AuthKind, Node, NodeSource};
 
 use crate::i18n::Strings;
 use crate::state::{TabKind, new_node_id};
@@ -10,6 +10,8 @@ use crate::state::{TabKind, new_node_id};
 pub(crate) struct NodeForm {
     pub node_id: String,
     pub editing: bool,
+    pub source: NodeSource,
+    pub alias: String,
     pub name: Entity<InputState>,
     pub host: Entity<InputState>,
     pub port: Entity<InputState>,
@@ -78,6 +80,8 @@ impl NodeForm {
         Self {
             node_id,
             editing: node.is_some(),
+            source: node.map(|node| node.source).unwrap_or(NodeSource::Managed),
+            alias: node.map(|node| node.alias.clone()).unwrap_or_default(),
             name,
             host,
             port,

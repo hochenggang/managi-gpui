@@ -7,9 +7,21 @@ use thiserror::Error;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {
+    /// 有私钥就用私钥，否则走密码/钥匙串。
     #[default]
+    Auto,
     Password,
     PrivateKey,
+}
+
+/// 节点来源。系统 SSH 配置里的主机只读；托管文件里的主机可编辑。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeSource {
+    #[default]
+    Local,
+    SshConfig,
+    Managed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +41,12 @@ pub struct Node {
     /// 分组名；空串表示未分组。
     #[serde(default)]
     pub group: String,
+    /// OpenSSH Host 别名；本地节点为空。
+    #[serde(default)]
+    pub alias: String,
+    /// 来源：本地配置 / 系统 ssh config / Managi 托管片段。
+    #[serde(default)]
+    pub source: NodeSource,
 }
 
 fn default_port() -> u16 {
@@ -49,15 +67,21 @@ impl Node {
             host: host.into(),
             port,
             username: username.into(),
-            auth: AuthKind::Password,
+            auth: AuthKind::Auto,
             key_path: String::new(),
             group: String::new(),
+            alias: String::new(),
+            source: NodeSource::Local,
         }
     }
 
+    /// 当前节点是否应走私钥认证（Auto 只要填了路径也走私钥）。
+    pub fn uses_key(&self) -> bool {
+        self.auth != AuthKind::Password && !self.key_path.trim().is_empty()
+    }
+
     /// 入库前校验。UI 只展示 [`NodeError`] 的中文文案。
-    pub fn validate(&self) -> Result<(), NodeError> {
-        if self.id.trim().is_empty() {
+    pub fn validate(&self) -> Result<(), NodeError> {        if self.id.trim().is_empty() {
             return Err(NodeError::EmptyId);
         }
         if self.name.trim().is_empty() {

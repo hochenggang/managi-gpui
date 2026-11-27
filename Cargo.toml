@@ -27,6 +27,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 directories = "6"
+keyring = { version = "3.4", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [profile.release]
 # 体积优先：Windows 单文件目标 ≤25 MB。

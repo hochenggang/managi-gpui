@@ -18,6 +18,11 @@ pub enum PathsError {
     Io(#[from] std::io::Error),
 }
 
+/// 用户主目录；优先平台标准目录，退回环境变量。
+pub fn home_dir() -> Option<PathBuf> {
+    BaseDirs::new().map(|base| base.home_dir().to_path_buf())
+}
+
 /// 所有落盘位置的唯一来源；测试可用 [`AppPaths::with_root`] 指向临时目录。
 #[derive(Clone, Debug)]
 pub struct AppPaths {

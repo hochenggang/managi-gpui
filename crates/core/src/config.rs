@@ -69,6 +69,28 @@ impl Config {
 
         Ok(())
     }
+
+    /// 合并导入的节点与分组：同 id 节点跳过，保留当前设置，返回新增节点数。
+    pub fn merge_from(&mut self, other: &Config) -> usize {
+        for group in &other.groups {
+            if !self.groups.contains(group) {
+                self.groups.push(group.clone());
+            }
+        }
+
+        let mut added = 0;
+        for node in &other.nodes {
+            if self.nodes.iter().any(|existing| existing.id == node.id) {
+                continue;
+            }
+            if !node.group.is_empty() && !self.groups.contains(&node.group) {
+                self.groups.push(node.group.clone());
+            }
+            self.nodes.push(node.clone());
+            added += 1;
+        }
+        added
+    }
 }
 
 #[derive(Debug, Error)]

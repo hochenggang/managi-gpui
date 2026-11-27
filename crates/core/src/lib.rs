@@ -6,9 +6,11 @@
 pub mod config;
 pub mod node;
 pub mod paths;
+pub mod secret;
 pub mod settings;
+pub mod ssh_config;
 
 pub use config::{Config, ConfigError};
-pub use node::{AuthKind, Node, NodeError};
+pub use node::{AuthKind, Node, NodeError, NodeSource};
 pub use paths::{AppPaths, PathsError};
 pub use settings::{Language, Settings, ThemeName};

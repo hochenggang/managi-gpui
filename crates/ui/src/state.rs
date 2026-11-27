@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use managi_core::ssh_config::{SYSTEM_GROUP, default_paths, read_hosts};
 use managi_core::{Config, Node};
 
 use crate::i18n::Strings;
@@ -52,6 +53,8 @@ pub(crate) struct AppState {
     pub query: String,
     pub notice: Option<String>,
     pub settings_section: SettingsSection,
+    /// `~/.ssh/config` 与托管片段里的主机；不写入 config.toml。
+    pub system_nodes: Vec<Node>,
 }
 
 pub(crate) struct DisplayGroup {
@@ -63,6 +66,7 @@ pub(crate) struct DisplayGroup {
 
 impl AppState {
     pub(crate) fn new(config: Config, config_path: PathBuf, version: String) -> Self {
+        let (system_nodes, ssh_error) = load_system_nodes();
         Self {
             config,
             config_path,
@@ -74,9 +78,29 @@ impl AppState {
             collapsed_groups: Vec::new(),
             sidebar_collapsed: false,
             query: String::new(),
-            notice: None,
+            notice: ssh_error,
             settings_section: SettingsSection::Appearance,
+            system_nodes,
         }
+    }
+
+    pub(crate) fn rescan_system_nodes(&mut self) {
+        match load_system_nodes() {
+            (nodes, Some(error)) => {
+                self.notice = Some(error);
+                self.system_nodes = nodes;
+            }
+            (nodes, None) => self.system_nodes = nodes,
+        }
+    }
+
+    pub(crate) fn find_node(&self, id: &str) -> Option<Node> {
+        self.config
+            .nodes
+            .iter()
+            .chain(self.system_nodes.iter())
+            .find(|node| node.id == id)
+            .cloned()
     }
 
     pub(crate) fn strings(&self) -> Strings {
@@ -235,7 +259,12 @@ impl AppState {
 
     pub(crate) fn display_groups(&self, strings: &Strings) -> Vec<DisplayGroup> {
         let query = self.query.trim().to_lowercase();
-        let mut all_nodes: Vec<&Node> = self.config.nodes.iter().collect();
+        let mut all_nodes: Vec<&Node> = self
+            .config
+            .nodes
+            .iter()
+            .chain(self.system_nodes.iter())
+            .collect();
         all_nodes.sort_by(|a, b| {
             a.name
                 .to_lowercase()
@@ -290,12 +319,39 @@ impl AppState {
             });
         }
 
+        if !self.system_nodes.is_empty() {
+            let filtered: Vec<Node> = self
+                .system_nodes
+                .iter()
+                .filter(|node| matches(node))
+                .cloned()
+                .collect();
+            if query.is_empty()
+                || !filtered.is_empty()
+                || SYSTEM_GROUP.to_lowercase().contains(&query)
+            {
+                groups.push(DisplayGroup {
+                    label: SYSTEM_GROUP.to_string(),
+                    all_hosts: false,
+                    count: filtered.len(),
+                    nodes: filtered,
+                });
+            }
+        }
+
         groups
     }
 
     pub(crate) fn node_ids(&self, group: &str) -> Vec<String> {
         if group.is_empty() {
-            self.config.nodes.iter().map(|node| node.id.clone()).collect()
+            self.config
+                .nodes
+                .iter()
+                .chain(self.system_nodes.iter())
+                .map(|node| node.id.clone())
+                .collect()
+        } else if group == SYSTEM_GROUP {
+            self.system_nodes.iter().map(|node| node.id.clone()).collect()
         } else {
             self.config
                 .nodes
@@ -304,6 +360,17 @@ impl AppState {
                 .map(|node| node.id.clone())
                 .collect()
         }
+    }
+}
+
+fn load_system_nodes() -> (Vec<Node>, Option<String>) {
+    let paths = match default_paths() {
+        Ok(paths) => paths,
+        Err(error) => return (Vec::new(), Some(error.to_string())),
+    };
+    match read_hosts(&paths) {
+        Ok(nodes) => (nodes, None),
+        Err(error) => (Vec::new(), Some(error.to_string())),
     }
 }
 

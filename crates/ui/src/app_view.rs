@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use managi_core::{Config, Node};
+use managi_core::secret::{self, SecretKind};
+use managi_core::ssh_config::{default_paths, remove_managed_node, upsert_managed_node};
+use managi_core::{paths::home_dir, Config, Node, NodeSource};
 use managi_ssh::{AuthMethod, ConnectRequest};
 use managi_term::encode_key;
 
@@ -85,6 +87,87 @@ impl AppView {
         }
     }
 
+    /// 先查进程内缓存，再查系统钥匙串；命中后写回缓存，避免重复打开凭据库。
+    fn credential(&mut self, node: &Node, kind: SecretKind) -> Option<String> {
+        if let Some(value) = self.passwords.get(&node.id).cloned() {
+            return Some(value);
+        }
+        let value = secret::get(&node.id, kind)?;
+        self.passwords.insert(node.id.clone(), value.clone());
+        Some(value)
+    }
+
+    pub(crate) fn export_config(&mut self, cx: &mut Context<Self>) {
+        let dir = home_dir().unwrap_or_else(std::env::temp_dir);
+        let receiver = cx.prompt_for_new_path(&dir, Some("managi-config.toml"));
+        let config = self.state.config.clone();
+        let strings = self.state.strings();
+
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = receiver.await else {
+                return;
+            };
+            let result = config.save(&path);
+            this.update(cx, |this, cx| {
+                this.state.notice = Some(match result {
+                    Ok(()) => format!("{} {}", strings.export_done, path.display()),
+                    Err(error) => format!("{}: {error}", strings.save_failed),
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn import_config(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("选择 Managi 配置文件".into()),
+        });
+        let strings = self.state.strings();
+
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.first() else {
+                return;
+            };
+            let imported = match Config::load(path) {
+                Ok(config) => config,
+                Err(error) => {
+                    this.update(cx, |this, cx| {
+                        this.state.notice = Some(format!("{}: {error}", strings.import_failed));
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+            };
+
+            this.update(cx, |this, cx| {
+                let config_path = this.state.config_path.clone();
+                let mut next = this.state.config.clone();
+                let added = next.merge_from(&imported);
+                match next.save(&config_path) {
+                    Ok(()) => {
+                        this.state.config = next;
+                        this.state.notice = Some(format!("{} {}", strings.import_done, added));
+                    }
+                    Err(error) => {
+                        this.state.notice = Some(format!("{}: {error}", strings.save_failed));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn open_terminal(
         &mut self,
         node: &Node,
@@ -100,9 +183,10 @@ impl AppView {
             return;
         }
 
-        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
-            self.start_session(&tab_id, node, None, window, cx);
-        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+        if node.uses_key() {
+            let passphrase = self.credential(node, SecretKind::Passphrase);
+            self.start_session(&tab_id, node, passphrase, window, cx);
+        } else if let Some(password) = self.credential(node, SecretKind::Password) {
             self.start_session(&tab_id, node, Some(password), window, cx);
         } else {
             let strings = self.state.strings();
@@ -134,9 +218,10 @@ impl AppView {
             return;
         }
 
-        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
-            self.start_sftp(&tab_id, node, None, window, cx);
-        } else if let Some(password) = self.passwords.get(&node.id).cloned() {
+        if node.uses_key() {
+            let passphrase = self.credential(node, SecretKind::Passphrase);
+            self.start_sftp(&tab_id, node, passphrase, window, cx);
+        } else if let Some(password) = self.credential(node, SecretKind::Password) {
             self.start_sftp(&tab_id, node, Some(password), window, cx);
         } else {
             let strings = self.state.strings();
@@ -170,17 +255,38 @@ impl AppView {
                 }
                 AuthMethod::PrivateKey {
                     path: PathBuf::from(path),
-                    passphrase: self.passwords.get(&node.id).cloned(),
+                    passphrase: password
+                        .or_else(|| self.passwords.get(&node.id).cloned())
+                        .or_else(|| secret::get(&node.id, SecretKind::Passphrase)),
+                }
+            }
+            managi_core::AuthKind::Auto => {
+                if node.uses_key() {
+                    AuthMethod::PrivateKey {
+                        path: PathBuf::from(node.key_path.trim()),
+                        passphrase: password
+                            .or_else(|| self.passwords.get(&node.id).cloned())
+                            .or_else(|| secret::get(&node.id, SecretKind::Passphrase)),
+                    }
+                } else {
+                    let password = password
+                        .or_else(|| self.passwords.get(&node.id).cloned())
+                        .or_else(|| secret::get(&node.id, SecretKind::Password))?;
+                    AuthMethod::Password(password)
                 }
             }
         };
 
-        let known_hosts_path = self
-            .state
-            .config_path
-            .parent()
-            .map(|parent| parent.join("known_hosts"))
-            .unwrap_or_else(|| PathBuf::from("known_hosts"));
+        let known_hosts_path = home_dir()
+            .map(|home| home.join(".ssh").join("known_hosts"))
+            .filter(|path| path.parent().is_some_and(|dir| dir.exists()))
+            .unwrap_or_else(|| {
+                self.state
+                    .config_path
+                    .parent()
+                    .map(|parent| parent.join("known_hosts"))
+                    .unwrap_or_else(|| PathBuf::from("known_hosts"))
+            });
 
         Some(ConnectRequest {
             host: node.host.clone(),
@@ -261,7 +367,7 @@ impl AppView {
         };
         self.terminals.remove(&tab_id);
 
-        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+        if node.uses_key() {
             self.start_session(&tab_id, &node, None, window, cx);
         } else if let Some(password) = self.passwords.get(&node.id).cloned() {
             self.start_session(&tab_id, &node, Some(password), window, cx);
@@ -297,7 +403,7 @@ impl AppView {
         };
         self.sftp.remove(&tab_id);
 
-        if node.auth == managi_core::AuthKind::PrivateKey && !node.key_path.trim().is_empty() {
+        if node.uses_key() {
             self.start_sftp(&tab_id, &node, None, window, cx);
         } else if let Some(password) = self.passwords.get(&node.id).cloned() {
             self.start_sftp(&tab_id, &node, Some(password), window, cx);
@@ -734,14 +840,7 @@ impl AppView {
         cx: &mut Context<Self>,
     ) {
         let strings = self.state.strings();
-        let node = node_id.and_then(|id| {
-            self.state
-                .config
-                .nodes
-                .iter()
-                .find(|node| node.id == id)
-                .cloned()
-        });
+        let node = node_id.and_then(|id| self.state.find_node(id));
         let form = NodeForm::create(node.as_ref(), window, cx, strings);
         let handle = form.name.read(cx).focus_handle(cx);
         handle.focus(window, cx);
@@ -799,6 +898,8 @@ impl AppView {
 
         let node_id = form.node_id.clone();
         let editing = form.editing;
+        let source = form.source;
+        let alias_text = form.alias.clone();
         let name = form.name.read(cx).value().trim().to_string();
         let host = form.host.read(cx).value().trim().to_string();
         let port_text = form.port.read(cx).value().trim().to_string();
@@ -840,6 +941,52 @@ impl AppView {
         node.group = group.clone();
         node.auth = auth;
         node.key_path = key_path;
+        node.source = source;
+
+        if source == NodeSource::Managed {
+            let alias = if alias_text.trim().is_empty() {
+                node.name.split_whitespace().collect::<Vec<_>>().join("-")
+            } else {
+                alias_text.trim().to_string()
+            };
+            if alias.is_empty()
+                || alias
+                    .chars()
+                    .any(|ch| ch.is_whitespace() || matches!(ch, '#' | '!' | '*' | '?'))
+            {
+                self.set_modal_error(strings.invalid_alias.to_string());
+                cx.notify();
+                return;
+            }
+            if self
+                .state
+                .system_nodes
+                .iter()
+                .any(|existing| existing.id != node_id && existing.alias.eq_ignore_ascii_case(&alias))
+            {
+                self.set_modal_error(strings.invalid_alias.to_string());
+                cx.notify();
+                return;
+            }
+
+            node.alias = alias;
+            node.group = managi_core::ssh_config::SYSTEM_GROUP.to_string();
+            let result = default_paths()
+                .map_err(|error| error.to_string())
+                .and_then(|paths| {
+                    upsert_managed_node(&paths, &node).map_err(|error| error.to_string())
+                });
+            match result {
+                Ok(()) => {
+                    self.state.rescan_system_nodes();
+                    self.state.notice = Some(strings.ssh_managed_note.to_string());
+                    self.modal = None;
+                }
+                Err(error) => self.set_modal_error(format!("{}: {error}", strings.ssh_config_failed)),
+            }
+            cx.notify();
+            return;
+        }
 
         if editing {
             match self
@@ -892,14 +1039,15 @@ impl AppView {
 
         match action {
             PromptAction::ConnectNode { node_id, kind } => {
+                let node = self.state.find_node(&node_id);
+                let secret_kind = match node.as_ref() {
+                    Some(node) if node.uses_key() => SecretKind::Passphrase,
+                    _ => SecretKind::Password,
+                };
+                if let Err(error) = secret::set(&node_id, secret_kind, &value) {
+                    self.state.notice = Some(format!("{}: {error}", strings.save_failed));
+                }
                 self.passwords.insert(node_id.clone(), value);
-                let node = self
-                    .state
-                    .config
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == node_id)
-                    .cloned();
                 self.modal = None;
                 if let Some(node) = node {
                     let Some(tab_id) = self.state.active_tab.clone() else {
@@ -991,6 +1139,45 @@ impl AppView {
 
         match action {
             ConfirmAction::DeleteNode(id) => {
+                let node = self.state.find_node(&id);
+                match node.map(|node| node.source) {
+                    Some(NodeSource::Managed) => {
+                        if let Some(node) = self.state.find_node(&id) {
+                            secret::forget_node(&node);
+                        }
+                        let result = default_paths()
+                            .map_err(|error| error.to_string())
+                            .and_then(|paths| {
+                                remove_managed_node(&paths, &id).map_err(|error| error.to_string())
+                            });
+                        match result {
+                            Ok(()) => {
+                                self.state.selected_nodes.retain(|node| node != &id);
+                                self.state.rescan_system_nodes();
+                                self.modal = None;
+                                cx.notify();
+                            }
+                            Err(error) => {
+                                self.set_modal_error(format!(
+                                    "{}: {error}",
+                                    strings.ssh_config_failed
+                                ));
+                                cx.notify();
+                            }
+                        }
+                        return;
+                    }
+                    Some(NodeSource::SshConfig) => {
+                        self.state.notice = Some(strings.ssh_readonly.to_string());
+                        self.modal = None;
+                        cx.notify();
+                        return;
+                    }
+                    _ => {}
+                }
+                if let Some(node) = self.state.find_node(&id) {
+                    secret::forget_node(&node);
+                }
                 self.state.config.nodes.retain(|node| node.id != id);
                 self.state.selected_nodes.retain(|node| node != &id);
             }
@@ -1043,10 +1230,7 @@ impl AppView {
                 let strings = self.state.strings();
                 let name = self
                     .state
-                    .config
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == id)
+                    .find_node(&id)
                     .map(|node| node.name.clone())
                     .unwrap_or_default();
                 let message = format!("{} {}?", strings.delete_node_confirm, name);
@@ -1119,30 +1303,39 @@ impl AppView {
 
     pub(crate) fn node_menu(&self, node_id: &str) -> Vec<MenuItem> {
         let strings = self.state.strings();
+        let Some(node) = self.state.find_node(node_id) else {
+            return Vec::new();
+        };
+        if node.source == NodeSource::SshConfig {
+            return Vec::new();
+        }
+
         let mut items = vec![MenuItem {
             label: strings.edit.to_string(),
             action: MenuAction::EditNode(node_id.to_string()),
             danger: false,
         }];
 
-        items.push(MenuItem {
-            label: strings.move_to_ungrouped.to_string(),
-            action: MenuAction::MoveNode {
-                node: node_id.to_string(),
-                group: String::new(),
-            },
-            danger: false,
-        });
-
-        for group in &self.state.config.groups {
+        if node.source == NodeSource::Local {
             items.push(MenuItem {
-                label: format!("{} \"{}\"", strings.move_to_group, group),
+                label: strings.move_to_ungrouped.to_string(),
                 action: MenuAction::MoveNode {
                     node: node_id.to_string(),
-                    group: group.clone(),
+                    group: String::new(),
                 },
                 danger: false,
             });
+
+            for group in &self.state.config.groups {
+                items.push(MenuItem {
+                    label: format!("{} \"{}\"", strings.move_to_group, group),
+                    action: MenuAction::MoveNode {
+                        node: node_id.to_string(),
+                        group: group.clone(),
+                    },
+                    danger: false,
+                });
+            }
         }
 
         items.push(MenuItem {
@@ -1359,6 +1552,13 @@ fn node_form_panel(
                 .flex()
                 .gap(px(6.0))
                 .child(auth_choice(
+                    "auth-auto",
+                    strings.auth_auto,
+                    form.auth == managi_core::AuthKind::Auto,
+                    palette,
+                    cx,
+                ))
+                .child(auth_choice(
                     "auth-password",
                     strings.auth_password,
                     form.auth == managi_core::AuthKind::Password,
@@ -1380,7 +1580,7 @@ fn node_form_panel(
             palette,
         ));
 
-    if form.auth == managi_core::AuthKind::PrivateKey {
+    if form.auth != managi_core::AuthKind::Password {
         panel = panel.child(field(
             strings.key_path,
             text_input(&form.key_path, palette, 32.0, 14.4, window, cx),
@@ -1587,10 +1787,10 @@ fn auth_choice(
     } else {
         palette.font_2
     };
-    let target = if id == "auth-key" {
-        managi_core::AuthKind::PrivateKey
-    } else {
-        managi_core::AuthKind::Password
+    let target = match id {
+        "auth-key" => managi_core::AuthKind::PrivateKey,
+        "auth-auto" => managi_core::AuthKind::Auto,
+        _ => managi_core::AuthKind::Password,
     };
 
     div()
