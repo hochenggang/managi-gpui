@@ -335,57 +335,6 @@ pub(crate) fn render(
                     this.handle_terminal_key(event, window, cx);
                 },
             ))
-            .child(
-                // 文本行自身会带一层单元格文本元素，鼠标事件容易落到它们上面；
-                // 这里再铺一层透明的交互层，保证点击聚焦、拖选始终命中。
-                div()
-                    .absolute()
-                    .left(px(0.0))
-                    .top(px(0.0))
-                    .w_full()
-                    .h_full()
-                    .id("terminal-pointer")
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            let (line, column, _) = cell_at(
-                                event.position,
-                                content_x,
-                                content_y,
-                                cell_width,
-                                line_height,
-                                screen_columns,
-                                screen_lines,
-                            );
-                            this.terminal_mouse_down(
-                                line,
-                                column,
-                                event.click_count,
-                                event.modifiers.control,
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(
-                        move |this, event: &MouseMoveEvent, _, cx| {
-                            if event.pressed_button != Some(MouseButton::Left) {
-                                return;
-                            }
-                            let (line, column, tail) = cell_at(
-                                event.position,
-                                content_x,
-                                content_y,
-                                cell_width,
-                                line_height,
-                                screen_columns,
-                                screen_lines,
-                            );
-                            this.terminal_mouse_move(line, column, tail, cx);
-                        },
-                    )),
-            )
     } else {
         screen
     };
@@ -401,6 +350,89 @@ pub(crate) fn render(
         main = main.child(quick_panel(language, strings, palette, cx));
     }
     main = main.child(body);
+    if runtime.is_some() {
+        // 透明交互层放在 main 上，而不是放进带 overflow_hidden 的文本容器里：
+        // 这样它的 hitbox 不会被文本裁剪层吞掉，点击聚焦和拖选都能命中。
+        main = main.child(
+            div()
+                .absolute()
+                .left(px(quick_width))
+                .top(px(0.0))
+                .w_full()
+                .h_full()
+                .id("terminal-pointer")
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        let (line, column, _) = cell_at(
+                            event.position,
+                            content_x,
+                            content_y,
+                            cell_width,
+                            line_height,
+                            screen_columns,
+                            screen_lines,
+                        );
+                        this.terminal_mouse_down(
+                            line,
+                            column,
+                            event.click_count,
+                            event.modifiers.control,
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        let (line, column, _) = cell_at(
+                            event.position,
+                            content_x,
+                            content_y,
+                            cell_width,
+                            line_height,
+                            screen_columns,
+                            screen_lines,
+                        );
+                        this.terminal_context_menu(
+                            event.position.x.as_f32(),
+                            event.position.y.as_f32(),
+                            line,
+                            column,
+                            window,
+                            cx,
+                        );
+                    }),
+                )
+                .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        return;
+                    }
+                    let (line, column, tail) = cell_at(
+                        event.position,
+                        content_x,
+                        content_y,
+                        cell_width,
+                        line_height,
+                        screen_columns,
+                        screen_lines,
+                    );
+                    this.terminal_mouse_move(line, column, tail, cx);
+                }))
+                .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
+                    let lines = match event.delta {
+                        ScrollDelta::Lines(delta) => delta.y.round() as i32,
+                        ScrollDelta::Pixels(delta) => (delta.y.as_f32() / line_height).round() as i32,
+                    };
+                    if lines != 0 {
+                        this.scroll_active(lines, cx);
+                        cx.stop_propagation();
+                    }
+                })),
+        );
+    }
     if search_open && runtime.is_some() {
         main = main.child(search_bar(runtime, search, palette, window, cx));
     }
