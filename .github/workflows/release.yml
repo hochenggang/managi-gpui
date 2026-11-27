@@ -119,12 +119,11 @@ jobs:
           files: release/**/*
           fail_on_unmatched_files: true
           body: |
-            Managi GPUI 首个可运行版本：Rust + GPUI 原生 SSH 客户端，无 WebView。
+            Managi GPUI v0.1.1：Rust + GPUI 原生 SSH 客户端，无 WebView。
 
-            - SSH 终端：密码/私钥、彩色与 CJK、滚轮回看、粘贴复制、断线重连
-            - SFTP：浏览、新建目录、上传、下载、删除文件与空目录
-            - 快捷命令面板：12 条常用运维命令
-            - 批量执行：多主机并发、逐主机退出码与输出、单机/全部停止
+            - 终端：行高按字体包围盒计算，g/y/p 下伸字母不再裁脚；光标对齐并闪烁；Tab / Shift+Tab 直接补全远端 shell；拖选高亮更清晰
+            - SFTP：下载弹系统保存对话框并显示实际落盘路径；上传支持原生多选文件选择器与整页拖入
+            - 保留 SSH 终端、彩色与 CJK、滚轮回看、搜索、SFTP 浏览/新建/删除、快捷命令和批量执行
 
             下载后请用同名 `.sha256` 校验。Windows 未签名，SmartScreen 提示时选择“仍要运行”。
             已知限制与使用说明见 README。
